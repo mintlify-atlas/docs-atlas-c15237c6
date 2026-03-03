@@ -1,0 +1,114 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "ngrx-rtk-query",
+  "projectDescription": "Angular library that brings RTK Query with auto-generated hooks to Angular using Signals",
+  "theme": "mint",
+  "primaryColor": "#DD0031",
+  "lightColor": "#C3002F",
+  "darkColor": "#A80028",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/queries",
+              "concepts/lazy-queries",
+              "concepts/infinite-queries",
+              "concepts/mutations",
+              "concepts/cache-invalidation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/store-configuration",
+              "guides/signal-inputs",
+              "guides/httpclient-integration",
+              "guides/code-splitting",
+              "guides/error-handling"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/basic-usage",
+              "examples/ngrx-store",
+              "examples/noop-store",
+              "examples/pagination",
+              "examples/infinite-scroll"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "api/create-api",
+              "api/fetch-base-query",
+              "api/build-hooks"
+            ]
+          },
+          {
+            "group": "Store Providers",
+            "pages": [
+              "api/provide-store-api",
+              "api/provide-noop-store-api"
+            ]
+          },
+          {
+            "group": "Hooks",
+            "pages": [
+              "api/hooks/use-query",
+              "api/hooks/use-lazy-query",
+              "api/hooks/use-infinite-query",
+              "api/hooks/use-mutation"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types/query-types",
+              "api/types/mutation-types",
+              "api/types/hook-result-types"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Auto-generated hooks from RTK Query API definitions",
+    "Signal-based reactivity for fine-grained change detection",
+    "Works with or without NgRx Store (provideStoreApi vs provideNoopStoreApi)",
+    "Support for queries, lazy queries, infinite queries, and mutations",
+    "Integration with Angular's dependency injection (HttpClient support)",
+    "Tag-based cache invalidation",
+    "TypeScript first with full type safety"
+  ],
+  "publicApiSurface": [
+    "createApi",
+    "fetchBaseQuery",
+    "provideStoreApi",
+    "provideNoopStoreApi",
+    "useXxxQuery",
+    "useLazyXxxQuery",
+    "useXxxInfiniteQuery",
+    "useXxxMutation",
+    "skipToken",
+    "angularHooksModule"
+  ]
+}
