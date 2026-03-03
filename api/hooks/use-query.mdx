@@ -1,0 +1,213 @@
+---
+title: useQuery
+description: Auto-generated hook for fetching data with automatic caching and re-rendering
+---
+
+`useQuery` is an auto-generated hook that automatically triggers data fetching, subscribes your component to cached data, and re-renders as the loading status changes.
+
+## Overview
+
+The hook is generated from your API definition using `createApi`. For an endpoint named `getPosts`, the generated hook will be `useGetPostsQuery`.
+
+```typescript
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({
+      query: () => '/posts',
+    }),
+  }),
+});
+
+export const { useGetPostsQuery } = postsApi;
+```
+
+## Signature
+
+```typescript
+const result = useXxxQuery(arg, options?);
+```
+
+<ParamField path="arg" type="QueryArg | Signal<QueryArg> | (() => QueryArg | SkipToken)" required>
+  The argument to pass to the query function. Can be:
+  - A static value
+  - A signal
+  - A function returning a value or `skipToken`
+</ParamField>
+
+<ParamField path="options" type="UseQueryOptions" >
+  Optional configuration object or signal:
+
+  <Expandable title="Query options">
+    <ParamField path="skip" type="boolean">
+      Skip this query execution if `true`
+    </ParamField>
+    
+    <ParamField path="pollingInterval" type="number">
+      Refetch interval in milliseconds. Set to `0` to disable polling
+    </ParamField>
+    
+    <ParamField path="skipPollingIfUnfocused" type="boolean">
+      Skip polling when window is unfocused
+    </ParamField>
+    
+    <ParamField path="refetchOnReconnect" type="boolean">
+      Refetch when network connection is restored
+    </ParamField>
+    
+    <ParamField path="refetchOnFocus" type="boolean">
+      Refetch when window regains focus
+    </ParamField>
+    
+    <ParamField path="refetchOnMountOrArgChange" type="boolean | number">
+      Refetch on mount or when arg changes. If number, minimum time in seconds between refetches
+    </ParamField>
+    
+    <ParamField path="selectFromResult" type="function">
+      Select a subset of the result for fine-grained reactivity
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Return Value
+
+Returns a signal object with query state and methods:
+
+<ResponseField name="data" type="Signal<ResultType | undefined>">
+  The returned data from the query. Access with `result.data()` for fine-grained reactivity
+</ResponseField>
+
+<ResponseField name="isLoading" type="Signal<boolean>">
+  `true` if the query is loading for the first time (no data yet)
+</ResponseField>
+
+<ResponseField name="isFetching" type="Signal<boolean>">
+  `true` if the query is currently fetching
+</ResponseField>
+
+<ResponseField name="isSuccess" type="Signal<boolean>">
+  `true` if the query has succeeded
+</ResponseField>
+
+<ResponseField name="isError" type="Signal<boolean>">
+  `true` if the query has errored
+</ResponseField>
+
+<ResponseField name="error" type="Signal<Error | undefined>">
+  The error object if the query failed
+</ResponseField>
+
+<ResponseField name="refetch" type="() => void">
+  Function to manually refetch the data
+</ResponseField>
+
+## Usage Examples
+
+### Basic Usage
+
+```typescript
+import { useGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-posts',
+  template: `
+    @if (postsQuery.isLoading()) {
+      <p>Loading...</p>
+    }
+    @if (postsQuery.isError()) {
+      <p>Error: {{ postsQuery.error() }}</p>
+    }
+    @if (postsQuery.data(); as posts) {
+      @for (post of posts; track post.id) {
+        <div>{{ post.title }}</div>
+      }
+    }
+  `,
+})
+export class PostsComponent {
+  postsQuery = useGetPostsQuery();
+}
+```
+
+### With Signal Parameters
+
+```typescript
+export class PostDetailsComponent {
+  postId = input.required<number>();
+  postQuery = useGetPostQuery(this.postId);
+}
+```
+
+### With Function Parameters
+
+```typescript
+export class PostDetailsComponent {
+  postId = signal(1);
+  
+  postQuery = useGetPostQuery(() => this.postId());
+}
+```
+
+### With skipToken
+
+```typescript
+import { skipToken } from 'ngrx-rtk-query';
+
+export class PostDetailsComponent {
+  postId = input<number | undefined>();
+  
+  // Only fetch when postId is defined
+  postQuery = useGetPostQuery(
+    () => this.postId() ?? skipToken
+  );
+}
+```
+
+### With Options
+
+```typescript
+export class PostDetailsComponent {
+  postId = input.required<number>();
+  
+  postQuery = useGetPostQuery(this.postId, {
+    pollingInterval: 5000, // Refetch every 5 seconds
+    refetchOnFocus: true,
+  });
+}
+```
+
+### With selectFromResult
+
+```typescript
+export class PostTitleComponent {
+  postId = input.required<number>();
+  
+  // Only subscribe to title changes
+  postQuery = useGetPostQuery(this.postId, {
+    selectFromResult: ({ data, isLoading }) => ({
+      title: data?.title,
+      isLoading,
+    }),
+  });
+}
+```
+
+## Fine-Grained vs Coarse-Grained Reactivity
+
+```typescript
+// Fine-grained: Only re-renders when isLoading changes
+{{ postsQuery.isLoading() }}
+
+// Coarse-grained: Re-renders when any property changes
+{{ postsQuery().isLoading }}
+```
+
+<Tip>
+Use fine-grained reactivity (`query.property()`) for better performance. Only use coarse-grained (`query().property`) when you need multiple properties at once.
+</Tip>
+
+## See Also
+
+- [useLazyQuery](/api/hooks/use-lazy-query) - For on-demand queries
+- [Queries Concept](/concepts/queries) - Core concepts
+- [Signal Inputs Guide](/guides/signal-inputs) - Using with Angular signals

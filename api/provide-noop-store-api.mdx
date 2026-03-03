@@ -1,0 +1,222 @@
+---
+title: provideNoopStoreApi
+description: Configure RTK Query without NgRx Store for lightweight Angular applications.
+---
+
+`provideNoopStoreApi` sets up RTK Query with a standalone signal-based store. It provides the same hook interface as `provideStoreApi` but without requiring NgRx Store as a dependency.
+
+## Usage
+
+### Basic Setup
+
+```typescript
+import { ApplicationConfig } from '@angular/core';
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideNoopStoreApi(postsApi),
+  ],
+};
+```
+
+### Multiple APIs
+
+```typescript
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+import { postsApi } from './posts/api';
+import { usersApi } from './users/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideNoopStoreApi(postsApi),
+    provideNoopStoreApi(usersApi),
+  ],
+};
+```
+
+### Minimal Example
+
+```typescript
+import { bootstrapApplication } from '@angular/platform-browser';
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query/core';
+import { AppComponent } from './app/app.component';
+
+const api = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+  endpoints: (build) => ({
+    getUser: build.query<User, number>({
+      query: (id) => `/users/${id}`,
+    }),
+  }),
+});
+
+bootstrapApplication(AppComponent, {
+  providers: [provideNoopStoreApi(api)],
+});
+```
+
+## Function Signature
+
+```typescript
+function provideNoopStoreApi(
+  api: Api<any, Record<string, any>, string, string, any>,
+  config?: StoreQueryConfig
+): EnvironmentProviders
+```
+
+## Parameters
+
+<ParamField path="api" type="Api" required>
+  The RTK Query API instance created with `createApi`. This defines your endpoints, base query, and cache behavior.
+</ParamField>
+
+<ParamField path="config" type="StoreQueryConfig">
+  Optional configuration object.
+
+  <Expandable title="properties">
+    <ParamField path="setupListeners" type="boolean | ListenerConfig">
+      Controls automatic refetching behavior. By default, RTK Query will automatically refetch queries when the window regains focus or when network connectivity is restored.
+
+      **Values:**
+      - `undefined` (default): Enable listeners with default behavior (refetch on focus/reconnect)
+      - `false`: Disable automatic refetching
+      - `{ onFocus, onReconnect, onOffline }`: Fine-grained control over listener behavior
+
+      **Example:**
+      ```typescript
+      // Disable automatic refetching
+      provideNoopStoreApi(postsApi, { setupListeners: false })
+
+      // Enable only focus refetching
+      provideNoopStoreApi(postsApi, {
+        setupListeners: { onFocus: true, onReconnect: false }
+      })
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Returns
+
+`EnvironmentProviders` - Angular environment providers that can be used in `ApplicationConfig` or route providers.
+
+## How It Works
+
+1. **Standalone Store**: Creates an `ApiStore` service with a signal-based state container
+2. **No NgRx Dependency**: Implements a minimal store interface without requiring `@ngrx/store`
+3. **Hook System**: Provides the same Angular hooks (`useXxxQuery`, `useMutation`, etc.) as `provideStoreApi`
+4. **Listeners**: Sets up automatic refetching on window focus and network reconnection (unless disabled)
+5. **State Isolation**: Each API instance has its own isolated state under `api.reducerPath`
+
+## When to Use
+
+Use `provideNoopStoreApi` when:
+
+- You want to use RTK Query without NgRx Store
+- Your application doesn't need global state management
+- You want a smaller bundle size
+- You're building a lightweight application or micro-frontend
+- You don't need Redux DevTools integration
+
+<Note>
+  **No Prerequisites**: Unlike `provideStoreApi`, this provider doesn't require `provideStore()`. It works standalone.
+</Note>
+
+## Internal Store Implementation
+
+The `ApiStore` class provides a minimal store implementation:
+
+```typescript
+@Injectable()
+export class ApiStore {
+  readonly state = signal<Record<string, any>>({});
+
+  selectSignal = <K>(mapFn: (state: any) => K): Signal<K> =>
+    computed(() => mapFn(this.state()));
+
+  dispatch = (action: UnknownAction, { reducerPath, reducer }) => {
+    const nextState = reducer(this.state()[reducerPath], action);
+    this.state.update((state) => ({ ...state, [reducerPath]: nextState }));
+  };
+}
+```
+
+This provides:
+- **Signal-based reactivity**: Uses Angular signals for efficient change detection
+- **Reducer pattern**: Processes RTK Query actions through reducers
+- **State isolation**: Multiple APIs can coexist with separate state slices
+
+## Comparison with provideStoreApi
+
+| Feature | provideNoopStoreApi | provideStoreApi |
+|---------|---------------------|------------------|
+| NgRx dependency | None | Required |
+| Redux DevTools | Not available | Supported |
+| State integration | Standalone signal store | Full NgRx Store |
+| Bundle size | Smaller | Larger (includes NgRx) |
+| Setup complexity | Simpler (one provider) | Requires provideStore() |
+| Use case | Standalone RTK Query | Apps with NgRx |
+| Hook compatibility | ✅ Same API | ✅ Same API |
+
+## Migration from provideStoreApi
+
+Switching from `provideStoreApi` to `provideNoopStoreApi` is straightforward:
+
+**Before:**
+```typescript
+import { provideStore } from '@ngrx/store';
+import { provideStoreApi } from 'ngrx-rtk-query';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideStore(),
+    provideStoreApi(postsApi),
+  ],
+};
+```
+
+**After:**
+```typescript
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideNoopStoreApi(postsApi), // No provideStore() needed
+  ],
+};
+```
+
+<Warning>
+  You'll lose Redux DevTools integration when migrating to `provideNoopStoreApi`. If you need DevTools for debugging, stick with `provideStoreApi`.
+</Warning>
+
+## Import Path
+
+Note the different import path:
+
+```typescript
+// Noop store variant
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+
+// NgRx store variant
+import { provideStoreApi } from 'ngrx-rtk-query';
+```
+
+The noop store is a separate entry point to keep it tree-shakeable and avoid bundling NgRx dependencies.
+
+## Limitations
+
+- **No Redux DevTools**: State inspection requires manual debugging
+- **No NgRx Integration**: Cannot use with NgRx effects, router store, or other NgRx features
+- **Limited Selector Composition**: The `createSelector` implementation is simplified compared to NgRx's version
+
+## See Also
+
+- [provideStoreApi](/api/provide-store-api) - NgRx Store integration provider
+- [createApi](/api/create-api) - Create RTK Query API definitions
+- [Store Configuration Guide](/guides/store-configuration) - Store setup and configuration

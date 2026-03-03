@@ -1,0 +1,296 @@
+---
+title: "Basic Usage"
+description: "Learn the fundamentals of ngrx-rtk-query with a complete posts API example"
+---
+
+This guide demonstrates the core concepts of ngrx-rtk-query using a complete posts management application.
+
+## API Definition
+
+Start by creating an API slice with `createApi` and defining your endpoints:
+
+```typescript app/posts/api.ts
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+import { type Post } from './post.model';
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({
+      query: () => ({ url: '/posts' }),
+      providesTags: (result) =>
+        result
+          ? [...result.map(({ id }) => ({ type: 'Posts', id }) as const), { type: 'Posts', id: 'LIST' }]
+          : [{ type: 'Posts', id: 'LIST' }],
+    }),
+    getPost: build.query<Post, number>({
+      query: (id) => `/posts/${id}`,
+      providesTags: (result, error, id) => [{ type: 'Posts', id }],
+    }),
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({
+        url: `/posts`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+    updatePost: build.mutation<Post, Partial<Post>>({
+      query: (data) => {
+        const { id, ...body } = data;
+        return {
+          url: `/posts/${id}`,
+          method: 'PUT',
+          body,
+        };
+      },
+      invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+    }),
+    deletePost: build.mutation<{ success: boolean; id: number }, number>({
+      query: (id) => ({
+        url: `/posts/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+  }),
+});
+
+export const { useGetPostQuery, useGetPostsQuery, useAddPostMutation, useDeletePostMutation, useUpdatePostMutation } =
+  postsApi;
+```
+
+```typescript app/posts/post.model.ts
+export interface Post {
+  id: number;
+  name: string;
+  fetched_at: string;
+}
+```
+
+## List Component with Query and Mutation
+
+Use `useGetPostsQuery` to fetch data and `useAddPostMutation` to create new posts:
+
+```typescript app/posts/posts-list.component.ts
+import { ChangeDetectionStrategy, Component, ViewEncapsulation, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import { useAddPostMutation, useGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-posts-list',
+  standalone: true,
+  imports: [FormsModule, RouterLink],
+  template: `
+    <section class="mb-4">
+      <input
+        id="name"
+        placeholder="New post name"
+        type="text"
+        [ngModel]="postNameControl()"
+        (ngModelChange)="postNameControl.set($event)"
+      />
+      <button
+        [disabled]="!postNameControl() || addPost.isLoading()"
+        (click)="addNewPost()"
+      >
+        {{ addPost.isLoading() ? 'Adding...' : 'Add Post' }}
+      </button>
+    </section>
+    <section class="flex flex-col">
+      <h1 class="mb-4 text-xl font-semibold">Posts List</h1>
+      @if (postsQuery.isLoading()) {
+        <small>Loading...</small>
+      }
+      @if (postsQuery.isError()) {
+        <small>Error...</small>
+      }
+      @if (postsQuery.data(); as posts) {
+        @for (post of posts; track post.id) {
+          <li>
+            <a class="hover:underline" [routerLink]="[post.id]">{{ post.name }}</a>
+          </li>
+        } @empty {
+          <p class="mt-4">No posts :(</p>
+        }
+        @if (postsQuery.isFetching()) {
+          <li>Refetching...</li>
+        }
+      }
+    </section>
+  `,
+  encapsulation: ViewEncapsulation.None,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class PostsListComponent {
+  readonly postsQuery = useGetPostsQuery();
+  readonly addPost = useAddPostMutation();
+
+  readonly postNameControl = signal('');
+
+  addNewPost() {
+    this.addPost({ name: this.postNameControl() })
+      .unwrap()
+      .then(() => {
+        this.postNameControl.set('');
+      });
+  }
+}
+```
+
+## Detail Component with Signal Input
+
+Use signal inputs to pass route parameters directly to queries:
+
+```typescript app/posts/post-details.component.ts
+import { JsonPipe } from '@angular/common';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ViewEncapsulation,
+  effect,
+  inject,
+  input,
+  numberAttribute,
+  signal,
+  untracked,
+} from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
+import { useDeletePostMutation, useGetPostQuery, useUpdatePostMutation } from './api';
+
+@Component({
+  selector: 'app-post-details',
+  standalone: true,
+  imports: [FormsModule, JsonPipe],
+  template: `
+    <h1 class="text-xl font-semibold">{{ postQuery.data()?.name }}</h1>
+    @if (!isEditing()) {
+      <div class="mt-4 flex items-center space-x-4">
+        <button
+          [disabled]="postQuery.isLoading() || deletePostMutation.isLoading() || updatePostMutation.isLoading()"
+          (click)="toggleEdit()"
+        >
+          {{ updatePostMutation.isLoading() ? 'Updating...' : 'Edit' }}
+        </button>
+        <button
+          [disabled]="postQuery.isLoading() || deletePostMutation.isLoading()"
+          (click)="deletePost()"
+        >
+          {{ deletePostMutation.isLoading() ? 'Deleting...' : 'Delete' }}
+        </button>
+        <button
+          [disabled]="postQuery.isFetching()"
+          (click)="postQuery.refetch()"
+        >
+          {{ postQuery.isFetching() ? 'Fetching...' : 'Refresh' }}
+        </button>
+      </div>
+    } @else {
+      <div class="mt-4 space-x-4">
+        <input type="text" [ngModel]="postNameControl()" (ngModelChange)="postNameControl.set($event)" />
+        <button
+          [disabled]="updatePostMutation.isLoading()"
+          (click)="updatePost()"
+        >
+          {{ updatePostMutation.isLoading() ? 'Updating...' : 'Update' }}
+        </button>
+        <button
+          [disabled]="updatePostMutation.isLoading()"
+          (click)="toggleEdit()"
+        >
+          Cancel
+        </button>
+      </div>
+    }
+
+    @if (postQuery.isFetching()) {
+      <p class="mt-4">Loading...</p>
+    }
+    <pre class="mt-4 bg-gray-200">{{ postQuery.data() | json }}</pre>
+  `,
+  encapsulation: ViewEncapsulation.None,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class PostDetailsComponent {
+  readonly id = input.required({ transform: numberAttribute });
+
+  readonly postQuery = useGetPostQuery(this.id, {
+    pollingInterval: 5000,
+  });
+
+  readonly updatePostMutation = useUpdatePostMutation();
+  readonly deletePostMutation = useDeletePostMutation();
+
+  readonly #router = inject(Router);
+  readonly postNameControl = signal('');
+  readonly isEditing = signal(false);
+
+  #_ = effect(() => {
+    const data = this.postQuery.data();
+    untracked(() => this.postNameControl.set(data?.name ?? ''));
+  });
+
+  updatePost(): void {
+    this.updatePostMutation({ id: this.id(), name: this.postNameControl() })
+      .unwrap()
+      .then(() => this.toggleEdit());
+  }
+
+  deletePost(): void {
+    this.deletePostMutation(this.id())
+      .unwrap()
+      .then(() => this.#router.navigate(['/']))
+      .catch(() => console.error('Error deleting Post'));
+  }
+
+  toggleEdit(): void {
+    this.isEditing.update((isEditing) => !isEditing);
+  }
+}
+```
+
+<Note>
+The `id` signal input is automatically passed to `useGetPostQuery`, which will refetch data whenever the route parameter changes.
+</Note>
+
+<Tip>
+Use `pollingInterval` to automatically refetch data at regular intervals, perfect for real-time updates.
+</Tip>
+
+## Key Concepts
+
+### Fine-Grained Signals
+
+Query results support both object and property access:
+
+```typescript
+// Fine-grained - only re-renders when isLoading changes
+postsQuery.isLoading()
+
+// Coarse-grained - re-renders when any query property changes
+postsQuery().isLoading
+```
+
+### Tag Invalidation
+
+Mutations automatically invalidate cached queries using tags:
+
+- `addPost` invalidates `{ type: 'Posts', id: 'LIST' }` to refetch the list
+- `updatePost` invalidates `{ type: 'Posts', id: <post-id> }` to refetch individual posts
+- `deletePost` invalidates the list tag
+
+### Unwrapping Mutations
+
+Use `.unwrap()` to access the mutation result or handle errors:
+
+```typescript
+try {
+  const newPost = await this.addPost({ name: 'New Post' }).unwrap();
+  console.log('Created:', newPost);
+} catch (error) {
+  console.error('Failed:', error);
+}
+```

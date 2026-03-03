@@ -1,0 +1,454 @@
+---
+title: Hook Result Types
+description: TypeScript types for hook return values and state objects in ngrx-rtk-query
+---
+
+## Query Result Types
+
+### UseQueryHookResult
+
+Complete result type combining query state and subscription functionality.
+
+```typescript
+type UseQueryHookResult<
+  D extends QueryDefinition<any, any, any, any>,
+  R = UseQueryStateDefaultResult<D>,
+> = UseQueryStateResult<D, R> & UseQuerySubscriptionResult<D>;
+```
+
+**Properties:**
+- All state signals from `UseQueryStateResult`
+- `refetch()` method from `UseQuerySubscriptionResult`
+
+**Example:**
+```typescript
+export class PostComponent {
+  postQuery = useGetPostQuery(this.postId);
+  // Access signals
+  isLoading = this.postQuery.isLoading;
+  data = this.postQuery.data;
+  // Call methods
+  refresh() {
+    this.postQuery.refetch();
+  }
+}
+```
+
+### TypedUseQueryHookResult
+
+Helper type for creating strongly-typed query results.
+
+```typescript
+type TypedUseQueryHookResult<
+  ResultType,
+  QueryArg,
+  BaseQuery extends BaseQueryFn,
+  R = UseQueryStateDefaultResult<...>
+> = TypedUseQueryStateResult<ResultType, QueryArg, BaseQuery, R> &
+  TypedUseQuerySubscriptionResult<ResultType, QueryArg, BaseQuery>;
+```
+
+### UseQueryStateResult
+
+Deep signal wrapper for query state.
+
+```typescript
+type UseQueryStateResult<
+  _ extends QueryDefinition<any, any, any, any>,
+  R
+> = DeepSignal<TSHelpersNoInfer<R>>;
+```
+
+Provides fine-grained signal access to all state properties:
+
+```typescript
+postQuery = useGetPostQuery(id);
+
+// Access as signals (recommended for change detection)
+postQuery.isLoading();
+postQuery.data();
+postQuery.error();
+postQuery.currentData();
+
+// Access as object (evaluates all signals)
+const state = postQuery();
+state.isLoading; // boolean
+state.data; // Post | undefined
+```
+
+### UseQueryStateDefaultResult
+
+Default state shape returned by query hooks.
+
+```typescript
+type UseQueryStateDefaultResult<D extends QueryDefinition<any, any, any, any>> = 
+  | UseQueryStateUninitialized<D>
+  | UseQueryStateLoading<D>
+  | UseQueryStateSuccessFetching<D>
+  | UseQueryStateSuccessNotFetching<D>
+  | UseQueryStateError<D>;
+```
+
+<ResponseField name="status" type="QueryStatus">
+Current query status: `'uninitialized' | 'pending' | 'fulfilled' | 'rejected'`
+
+<Warning>Deprecated. Use boolean flags instead: `isLoading`, `isFetching`, `isSuccess`, `isError`, `isUninitialized`</Warning>
+</ResponseField>
+
+<ResponseField name="data" type="ResultType | undefined">
+The result data from the query. Holds previous data while refetching.
+</ResponseField>
+
+<ResponseField name="currentData" type="ResultType | undefined">
+The result data for the current query arguments. Unlike `data`, this is cleared when arguments change.
+</ResponseField>
+
+<ResponseField name="error" type="unknown">
+Error object if the query failed.
+</ResponseField>
+
+<ResponseField name="isUninitialized" type="boolean">
+`true` when the query has not started yet.
+</ResponseField>
+
+<ResponseField name="isLoading" type="boolean">
+`true` when the query is loading for the first time (no data yet).
+</ResponseField>
+
+<ResponseField name="isFetching" type="boolean">
+`true` when the query is currently fetching, but might have data from an earlier request.
+</ResponseField>
+
+<ResponseField name="isSuccess" type="boolean">
+`true` when the query has data from a successful load.
+</ResponseField>
+
+<ResponseField name="isError" type="boolean">
+`true` when the query is in an error state.
+</ResponseField>
+
+<ResponseField name="fulfilledTimeStamp" type="number | undefined">
+Timestamp when the query was successfully fulfilled.
+</ResponseField>
+
+**Example:**
+```typescript
+postQuery = useGetPostQuery(id);
+
+// In template
+@if (postQuery.isLoading()) {
+  <p>Loading...</p>
+}
+@if (postQuery.isError()) {
+  <p>Error: {{ postQuery.error() }}</p>
+}
+@if (postQuery.data(); as post) {
+  <h1>{{ post.title }}</h1>
+}
+```
+
+### UseQuerySubscriptionResult
+
+Result from subscription-only query hooks.
+
+```typescript
+type UseQuerySubscriptionResult<D extends QueryDefinition<any, any, any, any>> = Pick<
+  QueryActionCreatorResult<D>,
+  'refetch'
+>;
+```
+
+<ResponseField name="refetch" type="() => QueryActionCreatorResult<D>">
+Triggers a refetch of the query data. Returns a promise-like object with `.unwrap()`.
+</ResponseField>
+
+**Example:**
+```typescript
+useQuerySubscription(id);
+const { refetch } = useQuerySubscription(id);
+
+refreshData() {
+  refetch().unwrap()
+    .then(data => console.log('Refreshed:', data))
+    .catch(error => console.error('Refresh failed:', error));
+}
+```
+
+### UseLazyQueryStateResult
+
+State result from lazy query hooks.
+
+```typescript
+type UseLazyQueryStateResult<
+  D extends QueryDefinition<any, any, any, any>,
+  R = UseQueryStateDefaultResult<D>,
+> = SignalsMap<TSHelpersNoInfer<R>> & {
+  reset: () => void;
+};
+```
+
+<ResponseField name="reset" type="() => void">
+Resets the hook state to its initial `uninitialized` state and removes the last result from the cache.
+</ResponseField>
+
+**Example:**
+```typescript
+searchQuery = useLazyGetPostsQuery();
+
+clearSearch() {
+  this.searchQuery.reset();
+  // State is now uninitialized, data cleared
+}
+```
+
+### UseLazyQueryLastPromiseInfo
+
+Tracking info for lazy query arguments.
+
+```typescript
+type UseLazyQueryLastPromiseInfo<D extends QueryDefinition<any, any, any, any>> = {
+  lastArg: Signal<QueryArgFrom<D>>;
+};
+```
+
+<ResponseField name="lastArg" type="Signal<QueryArgFrom<D>>">
+Signal containing the last argument used to trigger the lazy query.
+</ResponseField>
+
+## Infinite Query Result Types
+
+### UseInfiniteQueryHookResult
+
+Complete result for infinite query hooks.
+
+```typescript
+type UseInfiniteQueryHookResult<
+  D extends InfiniteQueryDefinition<any, any, any, any, any>,
+  R = UseInfiniteQueryStateDefaultResult<D>,
+> = UseInfiniteQueryStateResult<D, R> & 
+  Pick<UseInfiniteQuerySubscriptionResult<D>, 'refetch' | 'fetchNextPage' | 'fetchPreviousPage'>;
+```
+
+**Properties:**
+- All state signals from `UseInfiniteQueryStateResult`
+- Pagination methods: `fetchNextPage()`, `fetchPreviousPage()`, `refetch()`
+
+### UseInfiniteQueryStateDefaultResult
+
+Default state for infinite queries, similar to regular queries but with pagination info.
+
+```typescript
+type UseInfiniteQueryStateDefaultResult<
+  D extends InfiniteQueryDefinition<any, any, any, any, any>
+> = (
+  | UseInfiniteQueryStateUninitialized<D>
+  | UseInfiniteQueryStateLoading<D>
+  | UseInfiniteQueryStateSuccessFetching<D>
+  | UseInfiniteQueryStateSuccessNotFetching<D>
+  | UseInfiniteQueryStateError<D>
+) & { status: QueryStatus };
+```
+
+<ResponseField name="data" type="InfiniteData<ResultType, PageParam> | undefined">
+Structure containing all fetched pages:
+```typescript
+{
+  pages: Data[],      // Array of page results
+  pageParams: Param[] // Array of page parameters used
+}
+```
+</ResponseField>
+
+<ResponseField name="hasNextPage" type="boolean">
+`true` if there are more pages available to fetch forward.
+</ResponseField>
+
+<ResponseField name="hasPreviousPage" type="boolean">
+`true` if there are more pages available to fetch backward.
+</ResponseField>
+
+<ResponseField name="isFetchingNextPage" type="boolean">
+`true` when fetching the next page.
+</ResponseField>
+
+<ResponseField name="isFetchingPreviousPage" type="boolean">
+`true` when fetching the previous page.
+</ResponseField>
+
+**Example:**
+```typescript
+postsQuery = useGetPostsInfiniteQuery(undefined, {
+  initialPageParam: 0,
+});
+
+loadMore() {
+  if (this.postsQuery.hasNextPage() && !this.postsQuery.isFetchingNextPage()) {
+    this.postsQuery.fetchNextPage();
+  }
+}
+
+// In template
+@for (page of postsQuery.data()?.pages ?? []; track $index) {
+  @for (post of page; track post.id) {
+    <div>{{ post.title }}</div>
+  }
+}
+@if (postsQuery.hasNextPage()) {
+  <button (click)="loadMore()" [disabled]="postsQuery.isFetchingNextPage()">
+    Load More
+  </button>
+}
+```
+
+### UseInfiniteQuerySubscriptionResult
+
+Subscription result for infinite queries with pagination controls.
+
+```typescript
+type UseInfiniteQuerySubscriptionResult<
+  D extends InfiniteQueryDefinition<any, any, any, any, any>
+> = {
+  refetch: (options?: Pick<UseInfiniteQuerySubscriptionOptions<D>, 'refetchCachedPages'>) => InfiniteQueryActionCreatorResult<D>;
+  trigger: LazyInfiniteQueryTrigger<D>;
+  fetchNextPage: () => InfiniteQueryActionCreatorResult<D>;
+  fetchPreviousPage: () => InfiniteQueryActionCreatorResult<D>;
+};
+```
+
+<ResponseField name="fetchNextPage" type="() => Promise">
+Fetches the next page using the `getNextPageParam` callback defined in the endpoint.
+</ResponseField>
+
+<ResponseField name="fetchPreviousPage" type="() => Promise">
+Fetches the previous page using the `getPreviousPageParam` callback defined in the endpoint.
+</ResponseField>
+
+<ResponseField name="refetch" type="(options?) => Promise">
+Refetches all cached pages. Pass `{ refetchCachedPages: false }` to only refetch the first page.
+</ResponseField>
+
+## Mutation Result Types
+
+### UseMutationStateResult
+
+State result from mutation hooks.
+
+```typescript
+type UseMutationStateResult<
+  D extends MutationDefinition<any, any, any, any>,
+  R
+> = SignalsMap<TSHelpersNoInfer<R>> & {
+  originalArgs: Signal<QueryArgFrom<D> | undefined>;
+  reset: () => void;
+};
+```
+
+<ResponseField name="data" type="ResultType | undefined">
+The result data from the mutation.
+</ResponseField>
+
+<ResponseField name="error" type="unknown">
+Error object if the mutation failed.
+</ResponseField>
+
+<ResponseField name="isUninitialized" type="boolean">
+`true` when the mutation has not been triggered yet.
+</ResponseField>
+
+<ResponseField name="isLoading" type="boolean">
+`true` when the mutation is currently in progress.
+</ResponseField>
+
+<ResponseField name="isSuccess" type="boolean">
+`true` when the mutation completed successfully.
+</ResponseField>
+
+<ResponseField name="isError" type="boolean">
+`true` when the mutation failed.
+</ResponseField>
+
+<ResponseField name="originalArgs" type="Signal<QueryArgFrom<D> | undefined>">
+Signal containing the original arguments used to trigger the mutation.
+</ResponseField>
+
+<ResponseField name="reset" type="() => void">
+Resets the mutation state to its initial `uninitialized` state and removes the last result from the cache.
+</ResponseField>
+
+**Example:**
+```typescript
+addPost = useAddPostMutation();
+
+// In template
+<button 
+  (click)="addPost({ title: 'New Post' })" 
+  [disabled]="addPost.isLoading()">
+  {{ addPost.isLoading() ? 'Saving...' : 'Add Post' }}
+</button>
+
+@if (addPost.isError()) {
+  <p>Error: {{ addPost.error() }}</p>
+  <button (click)="addPost.reset()">Dismiss</button>
+}
+
+@if (addPost.isSuccess()) {
+  <p>Post created: {{ addPost.data()?.title }}</p>
+}
+```
+
+### TypedUseMutationResult
+
+Helper type for creating strongly-typed mutation results.
+
+```typescript
+type TypedUseMutationResult<
+  ResultType,
+  QueryArg,
+  BaseQuery extends BaseQueryFn,
+  R = MutationResultSelectorResult<MutationDefinition<QueryArg, BaseQuery, string, ResultType, string>>,
+> = UseMutationStateResult<MutationDefinition<QueryArg, BaseQuery, string, ResultType, string>, R>;
+```
+
+## Utility Types
+
+### DeepSignal
+
+Recursively wraps an object structure with signals for fine-grained reactivity.
+
+```typescript
+type DeepSignal<T> = {
+  (): T;
+  [K in keyof T]: Signal<T[K]>;
+};
+```
+
+Allows accessing properties as individual signals or as a computed object:
+
+```typescript
+query = useGetPostQuery(id);
+
+// As individual signals
+query.isLoading(); // Signal<boolean>
+query.data();      // Signal<Post | undefined>
+
+// As computed object
+query(); // { isLoading: boolean, data: Post | undefined, ... }
+```
+
+### SignalsMap
+
+Maps object properties to signals.
+
+```typescript
+type SignalsMap<T> = {
+  [K in keyof T]: Signal<T[K]>;
+};
+```
+
+Used for mutation and lazy query results where the root is not callable:
+
+```typescript
+addPost = useAddPostMutation();
+// addPost is not callable
+addPost.isLoading(); // But properties are signals
+```

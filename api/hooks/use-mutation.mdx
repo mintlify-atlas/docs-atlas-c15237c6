@@ -1,0 +1,334 @@
+---
+title: useMutation
+description: Auto-generated hook for creating, updating, and deleting data
+---
+
+`useMutation` is an auto-generated hook for performing data modifications (create, update, delete operations).
+
+## Overview
+
+For an endpoint named `addPost`, the generated hook will be `useAddPostMutation`.
+
+```typescript
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+  endpoints: (build) => ({
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({
+        url: '/posts',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+  }),
+});
+
+export const { useAddPostMutation } = postsApi;
+```
+
+## Signature
+
+```typescript
+const [trigger, result] = useXxxMutation(options?);
+```
+
+<ParamField path="options" type="UseMutationOptions">
+  Optional configuration object
+
+  <Expandable title="Mutation options">
+    <ParamField path="fixedCacheKey" type="string">
+      Share mutation state across multiple components using the same cache key
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Return Value
+
+Returns an object with trigger function and mutation state:
+
+<ResponseField name="trigger" type="(arg: MutationArg) => Promise">
+  Function to trigger the mutation. Returns a promise with `unwrap()` method
+</ResponseField>
+
+<ResponseField name="data" type="Signal<ResultType | undefined>">
+  The returned data from the mutation
+</ResponseField>
+
+<ResponseField name="isLoading" type="Signal<boolean>">
+  `true` while the mutation is in progress
+</ResponseField>
+
+<ResponseField name="isSuccess" type="Signal<boolean>">
+  `true` if the mutation succeeded
+</ResponseField>
+
+<ResponseField name="isError" type="Signal<boolean>">
+  `true` if the mutation failed
+</ResponseField>
+
+<ResponseField name="error" type="Signal<Error | undefined>">
+  The error object if the mutation failed
+</ResponseField>
+
+<ResponseField name="reset" type="() => void">
+  Function to reset the mutation state
+</ResponseField>
+
+## Usage Examples
+
+### Basic Usage
+
+```typescript
+import { useAddPostMutation } from './api';
+
+@Component({
+  selector: 'app-add-post',
+  template: `
+    <form (submit)="onSubmit()">
+      <input [(ngModel)]="title" placeholder="Title" />
+      <button 
+        type="submit" 
+        [disabled]="addPost.isLoading()">
+        {{ addPost.isLoading() ? 'Adding...' : 'Add Post' }}
+      </button>
+    </form>
+    
+    @if (addPost.isError()) {
+      <p class="error">{{ addPost.error() }}</p>
+    }
+  `,
+})
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+  title = '';
+  
+  onSubmit() {
+    this.addPost({ title: this.title });
+  }
+}
+```
+
+### With Promise Handling (unwrap)
+
+```typescript
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+  title = '';
+  
+  async onSubmit() {
+    try {
+      const newPost = await this.addPost({ 
+        title: this.title 
+      }).unwrap();
+      
+      console.log('Post created:', newPost);
+      this.title = ''; // Clear form
+    } catch (error) {
+      console.error('Failed to add post:', error);
+    }
+  }
+}
+```
+
+### With Then/Catch
+
+```typescript
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+  
+  onSubmit() {
+    this.addPost({ title: this.title })
+      .unwrap()
+      .then((newPost) => {
+        console.log('Success:', newPost);
+        this.router.navigate(['/posts', newPost.id]);
+      })
+      .catch((error) => {
+        console.error('Error:', error);
+      });
+  }
+}
+```
+
+### Update Mutation
+
+```typescript
+export const postsApi = createApi({
+  endpoints: (build) => ({
+    updatePost: build.mutation<Post, { id: number; data: Partial<Post> }>({
+      query: ({ id, data }) => ({
+        url: `/posts/${id}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+    }),
+  }),
+});
+
+export const { useUpdatePostMutation } = postsApi;
+
+// Component
+export class EditPostComponent {
+  updatePost = useUpdatePostMutation();
+  postId = input.required<number>();
+  
+  onSave(data: Partial<Post>) {
+    this.updatePost({ 
+      id: this.postId(), 
+      data 
+    }).unwrap();
+  }
+}
+```
+
+### Delete Mutation
+
+```typescript
+export const postsApi = createApi({
+  endpoints: (build) => ({
+    deletePost: build.mutation<void, number>({
+      query: (id) => ({
+        url: `/posts/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (result, error, id) => [
+        { type: 'Posts', id },
+        { type: 'Posts', id: 'LIST' },
+      ],
+    }),
+  }),
+});
+
+export const { useDeletePostMutation } = postsApi;
+
+// Component
+export class PostComponent {
+  deletePost = useDeletePostMutation();
+  
+  async onDelete(postId: number) {
+    if (confirm('Delete this post?')) {
+      try {
+        await this.deletePost(postId).unwrap();
+        this.router.navigate(['/posts']);
+      } catch (error) {
+        alert('Failed to delete post');
+      }
+    }
+  }
+}
+```
+
+### Reset Mutation State
+
+```typescript
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+  
+  onSubmit() {
+    this.addPost({ title: 'New Post' });
+  }
+  
+  clearError() {
+    this.addPost.reset();
+  }
+}
+```
+
+### Fixed Cache Key (Shared State)
+
+```typescript
+// Component 1
+export class UploadComponent {
+  upload = useUploadFileMutation({ fixedCacheKey: 'file-upload' });
+  
+  onUpload(file: File) {
+    this.upload(file);
+  }
+}
+
+// Component 2 - Shows same upload progress
+export class UploadStatusComponent {
+  upload = useUploadFileMutation({ fixedCacheKey: 'file-upload' });
+  
+  // Shares state with UploadComponent
+  progress = computed(() => {
+    if (this.upload.isLoading()) return 'Uploading...';
+    if (this.upload.isSuccess()) return 'Complete!';
+    return 'Ready';
+  });
+}
+```
+
+## Accessing Mutation State in Template
+
+```typescript
+@Component({
+  template: `
+    <button 
+      (click)="addPost({ title: 'New' })"
+      [disabled]="addPost.isLoading()">
+      Add Post
+    </button>
+    
+    @if (addPost.isLoading()) {
+      <p>Creating post...</p>
+    }
+    @if (addPost.isSuccess()) {
+      <p>Post created: {{ addPost.data()?.title }}</p>
+    }
+    @if (addPost.isError()) {
+      <p>Error: {{ addPost.error() }}</p>
+    }
+  `,
+})
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+}
+```
+
+## Optimistic Updates
+
+```typescript
+export const postsApi = createApi({
+  endpoints: (build) => ({
+    updatePost: build.mutation<Post, { id: number; data: Partial<Post> }>({
+      query: ({ id, data }) => ({
+        url: `/posts/${id}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      async onQueryStarted({ id, data }, { dispatch, queryFulfilled }) {
+        // Optimistically update the cache
+        const patchResult = dispatch(
+          postsApi.util.updateQueryData('getPost', id, (draft) => {
+            Object.assign(draft, data);
+          })
+        );
+        
+        try {
+          await queryFulfilled;
+        } catch {
+          // Revert on error
+          patchResult.undo();
+        }
+      },
+    }),
+  }),
+});
+```
+
+<Tip>
+Always use `unwrap()` when you need to handle success/error cases. Without it, the promise will always resolve, even on errors.
+</Tip>
+
+<Warning>
+Mutations don't automatically trigger until you call the trigger function. Unlike queries, they are always "lazy".
+</Warning>
+
+## See Also
+
+- [Mutations Concept](/concepts/mutations) - Core concepts
+- [Cache Invalidation](/concepts/cache-invalidation) - Invalidating queries after mutations
+- [Error Handling Guide](/guides/error-handling) - Handling mutation errors

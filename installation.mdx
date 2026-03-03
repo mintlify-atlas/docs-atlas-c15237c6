@@ -1,0 +1,134 @@
+---
+title: Installation
+description: Install ngrx-rtk-query in your Angular application with npm, yarn, or pnpm
+---
+
+# Installation
+
+Get started with ngrx-rtk-query by installing it in your Angular project. The library requires `@reduxjs/toolkit` as a peer dependency.
+
+## Install the Package
+
+Choose your preferred package manager to install ngrx-rtk-query:
+
+<CodeGroup>
+```bash npm
+npm install ngrx-rtk-query @reduxjs/toolkit
+```
+
+```bash yarn
+yarn add ngrx-rtk-query @reduxjs/toolkit
+```
+
+```bash pnpm
+pnpm add ngrx-rtk-query @reduxjs/toolkit
+```
+</CodeGroup>
+
+## Peer Dependencies
+
+The library requires the following peer dependencies:
+
+| Package | Version | Optional |
+|---------|---------|----------|
+| `@angular/core` | >=21.0.0 | No |
+| `@reduxjs/toolkit` | ~2.11.2 | No |
+| `@ngrx/store` | >=21.0.0 | Yes |
+
+<Note>
+  **@ngrx/store is optional**: You can use ngrx-rtk-query with or without NgRx Store. See [Store Variants](#store-variants) below.
+</Note>
+
+## Version Compatibility
+
+The library versions align with Angular major versions. Always use the version that matches your Angular version:
+
+| Angular / NgRx | ngrx-rtk-query | @reduxjs/toolkit | Support |
+|:------------:|:----------------:|:----------------:|:------------------:|
+| >=21.x | >=21.0.0 (signals) | ~2.11.2 | Bugs / New Features |
+| >=20.x | >=20.0.0 (signals) | ~2.9.0 | Bugs |
+| >=18.x | >=18.2.0 (signals) | ~2.6.0 | Bugs |
+| >=18.x | >=18.1.0 (signals) | ~2.5.0 | Bugs |
+| 18.x | >=18.0.0 (signals) | ~2.2.5 | Critical bugs |
+| 17.x | >=17.1.x (signals) | ~2.2.1 | Critical bugs |
+| 16.x | >=4.2.x (rxjs) | ~1.9.3 | Critical bugs |
+| 15.x | 4.1.x (rxjs) | 1.9.3 | None |
+
+<Warning>
+  Only the latest version of Angular in the table above is actively supported. This is due to Angular library compilation being [incompatible between major versions](https://angular.io/guide/creating-libraries#ensuring-library-version-compatibility).
+</Warning>
+
+## Store Variants
+
+ngrx-rtk-query offers two integration modes depending on whether you use NgRx Store in your application.
+
+### With NgRx Store
+
+If your application uses NgRx Store, install it alongside ngrx-rtk-query:
+
+<CodeGroup>
+```bash npm
+npm install @ngrx/store @ngrx/store-devtools ngrx-rtk-query @reduxjs/toolkit
+```
+
+```bash yarn
+yarn add @ngrx/store @ngrx/store-devtools ngrx-rtk-query @reduxjs/toolkit
+```
+
+```bash pnpm
+pnpm add @ngrx/store @ngrx/store-devtools ngrx-rtk-query @reduxjs/toolkit
+```
+</CodeGroup>
+
+Then import from the main package:
+
+```typescript
+import { createApi, fetchBaseQuery, provideStoreApi } from 'ngrx-rtk-query';
+```
+
+### Without NgRx Store (Noop Store)
+
+For lightweight applications that don't need NgRx Store, use the noop store variant:
+
+<CodeGroup>
+```bash npm
+npm install ngrx-rtk-query @reduxjs/toolkit
+```
+
+```bash yarn
+yarn add ngrx-rtk-query @reduxjs/toolkit
+```
+
+```bash pnpm
+pnpm add ngrx-rtk-query @reduxjs/toolkit
+```
+</CodeGroup>
+
+Then import from the appropriate packages:
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query/core';
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+```
+
+## Import Paths
+
+Depending on your setup, import from the appropriate paths:
+
+| Setup | Import Path |
+|-------|-------------|
+| With NgRx Store | `'ngrx-rtk-query'` |
+| Core (no store) | `'ngrx-rtk-query/core'` |
+| Noop Store | `'ngrx-rtk-query/noop-store'` |
+
+<Tip>
+  Use the main `'ngrx-rtk-query'` import if you're using NgRx Store - it re-exports everything from core and includes store integration.
+</Tip>
+
+## Next Steps
+
+Now that you have ngrx-rtk-query installed, continue to the Quick Start guide to build your first API integration:
+
+<Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+  Learn how to create your first API and use it in a component
+</Card>

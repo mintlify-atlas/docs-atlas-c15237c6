@@ -1,0 +1,360 @@
+---
+title: "Pagination"
+description: "Implement pagination patterns with lazy queries and cache management"
+---
+
+This guide demonstrates how to implement pagination using lazy queries with `preferCacheValue` for optimal performance.
+
+## Lazy Query Pattern
+
+Use `useLazyGetPostsQuery` to manually trigger queries for specific pages:
+
+```typescript app/posts/paginated-posts.component.ts
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import { useLazyGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-paginated-posts',
+  standalone: true,
+  imports: [FormsModule, RouterLink],
+  template: `
+    <section>
+      <h1>Posts - Page {{ currentPage() }}</h1>
+      
+      @if (postsQuery.isLoading()) {
+        <p>Loading...</p>
+      }
+      
+      @if (postsQuery.isError()) {
+        <p>Error loading posts</p>
+      }
+      
+      @if (postsQuery.data(); as posts) {
+        <ul>
+          @for (post of posts; track post.id) {
+            <li>
+              <a [routerLink]="['/posts', post.id]">{{ post.name }}</a>
+            </li>
+          }
+        </ul>
+      }
+      
+      <div class="pagination-controls">
+        <button
+          [disabled]="currentPage() === 1 || postsQuery.isFetching()"
+          (click)="goToPage(currentPage() - 1)"
+        >
+          Previous
+        </button>
+        
+        <span>Page {{ currentPage() }}</span>
+        
+        <button
+          [disabled]="postsQuery.isFetching()"
+          (click)="goToPage(currentPage() + 1)"
+        >
+          Next
+        </button>
+      </div>
+    </section>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class PaginatedPostsComponent {
+  readonly postsQuery = useLazyGetPostsQuery();
+  readonly currentPage = signal(1);
+
+  constructor() {
+    // Load first page on init
+    this.goToPage(1);
+  }
+
+  goToPage(page: number): void {
+    this.currentPage.set(page);
+    this.postsQuery(
+      { page, limit: 10 },
+      { preferCacheValue: true }
+    );
+  }
+}
+```
+
+<Note>
+`preferCacheValue: true` prevents unnecessary refetches when navigating to previously visited pages. The query will only fetch if the page is not in cache.
+</Note>
+
+## API Definition with Pagination
+
+Define an endpoint that accepts pagination parameters:
+
+```typescript app/posts/api.ts
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+import { type Post } from './post.model';
+
+interface PaginationParams {
+  page: number;
+  limit: number;
+}
+
+interface PaginatedResponse {
+  posts: Post[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    getPosts: build.query<PaginatedResponse, PaginationParams>({
+      query: ({ page, limit }) => ({
+        url: '/posts',
+        params: { page, limit },
+      }),
+      providesTags: (result) =>
+        result
+          ? [
+              ...result.posts.map(({ id }) => ({ type: 'Posts', id }) as const),
+              { type: 'Posts', id: 'PARTIAL-LIST' },
+            ]
+          : [{ type: 'Posts', id: 'PARTIAL-LIST' }],
+    }),
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({
+        url: '/posts',
+        method: 'POST',
+        body,
+      }),
+      // Invalidate all paginated queries
+      invalidatesTags: [{ type: 'Posts', id: 'PARTIAL-LIST' }],
+    }),
+  }),
+});
+
+export const { useLazyGetPostsQuery, useAddPostMutation } = postsApi;
+```
+
+## Advanced Pagination with Page Numbers
+
+Show page numbers with active state:
+
+```typescript app/posts/advanced-pagination.component.ts
+import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
+import { useLazyGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-advanced-pagination',
+  standalone: true,
+  imports: [RouterLink],
+  template: `
+    <section>
+      <h1>Posts</h1>
+      
+      @if (postsQuery.data(); as response) {
+        <ul>
+          @for (post of response.posts; track post.id) {
+            <li>
+              <a [routerLink]="['/posts', post.id]">{{ post.name }}</a>
+            </li>
+          }
+        </ul>
+        
+        <div class="pagination">
+          <button
+            [disabled]="currentPage() === 1 || postsQuery.isFetching()"
+            (click)="goToPage(currentPage() - 1)"
+          >
+            Previous
+          </button>
+          
+          @for (page of pageNumbers(); track page) {
+            <button
+              class="page-number"
+              [class.active]="page === currentPage()"
+              [disabled]="postsQuery.isFetching()"
+              (click)="goToPage(page)"
+            >
+              {{ page }}
+            </button>
+          }
+          
+          <button
+            [disabled]="currentPage() === totalPages() || postsQuery.isFetching()"
+            (click)="goToPage(currentPage() + 1)"
+          >
+            Next
+          </button>
+        </div>
+        
+        <p class="meta">
+          Showing {{ response.posts.length }} of {{ response.total }} posts
+        </p>
+      }
+    </section>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class AdvancedPaginationComponent {
+  readonly postsQuery = useLazyGetPostsQuery();
+  readonly currentPage = signal(1);
+  readonly pageSize = signal(10);
+
+  readonly totalPages = computed(() => {
+    const data = this.postsQuery.data();
+    return data?.totalPages ?? 1;
+  });
+
+  readonly pageNumbers = computed(() => {
+    const total = this.totalPages();
+    const current = this.currentPage();
+    const delta = 2; // Pages to show on each side of current
+
+    const range: number[] = [];
+    const left = Math.max(1, current - delta);
+    const right = Math.min(total, current + delta);
+
+    for (let i = left; i <= right; i++) {
+      range.push(i);
+    }
+
+    return range;
+  });
+
+  constructor() {
+    this.goToPage(1);
+  }
+
+  goToPage(page: number): void {
+    this.currentPage.set(page);
+    this.postsQuery(
+      { page, limit: this.pageSize() },
+      { preferCacheValue: true }
+    );
+  }
+}
+```
+
+## Reset Pagination Cache
+
+Clear cached pages when needed:
+
+```typescript
+export class PaginatedPostsComponent {
+  readonly postsQuery = useLazyGetPostsQuery();
+
+  resetCache(): void {
+    // Reset the query state
+    this.postsQuery.reset();
+    
+    // Reload first page
+    this.goToPage(1);
+  }
+}
+```
+
+<Tip>
+Use `reset()` when you need to clear all cached pages, such as after a filter change or when implementing a "Refresh" button.
+</Tip>
+
+## Cursor-Based Pagination
+
+For cursor-based APIs, track the cursor instead of page numbers:
+
+```typescript app/posts/cursor-pagination.component.ts
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { useLazyGetPostsQuery } from './api';
+
+interface CursorParams {
+  cursor?: string;
+  limit: number;
+}
+
+interface CursorResponse {
+  posts: Post[];
+  nextCursor?: string;
+  prevCursor?: string;
+}
+
+@Component({
+  selector: 'app-cursor-pagination',
+  template: `
+    <section>
+      @if (postsQuery.data(); as response) {
+        <ul>
+          @for (post of response.posts; track post.id) {
+            <li>{{ post.name }}</li>
+          }
+        </ul>
+        
+        <div class="pagination">
+          <button
+            [disabled]="!response.prevCursor || postsQuery.isFetching()"
+            (click)="loadPage(response.prevCursor!)"
+          >
+            Previous
+          </button>
+          
+          <button
+            [disabled]="!response.nextCursor || postsQuery.isFetching()"
+            (click)="loadPage(response.nextCursor!)"
+          >
+            Next
+          </button>
+        </div>
+      }
+    </section>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class CursorPaginationComponent {
+  readonly postsQuery = useLazyGetPostsQuery();
+  readonly cursors = signal<string[]>([]);
+
+  constructor() {
+    this.loadPage();
+  }
+
+  loadPage(cursor?: string): void {
+    this.postsQuery(
+      { cursor, limit: 10 },
+      { preferCacheValue: true }
+    );
+  }
+}
+```
+
+## Best Practices
+
+### Cache Strategy
+
+- Use `preferCacheValue: true` for pagination to avoid refetching visited pages
+- Invalidate paginated caches with a common tag like `PARTIAL-LIST`
+- Consider cache TTL for data that changes frequently
+
+### User Experience
+
+- Disable navigation buttons during loading
+- Show loading states for better feedback
+- Preserve scroll position when navigating (Angular router handles this)
+- Consider skeleton loaders for initial page load
+
+### Performance
+
+```typescript
+// ✅ Good: Fine-grained reactivity
+postsQuery.isFetching()
+postsQuery.data()
+
+// ❌ Avoid: Coarse-grained (re-renders on any change)
+const query = postsQuery();
+query.isFetching
+query.data
+```
+
+<Note>
+For infinite scroll patterns where all pages are displayed together, see the [Infinite Scroll](/examples/infinite-scroll) guide.
+</Note>

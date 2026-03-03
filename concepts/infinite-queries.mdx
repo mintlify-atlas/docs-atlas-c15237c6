@@ -1,0 +1,473 @@
+---
+title: Infinite Queries
+description: Implement infinite scrolling and load more patterns with ngrx-rtk-query
+---
+
+## Overview
+
+Infinite queries enable "load more" and infinite scroll patterns by caching multiple "pages" within a single cache entry. Each page is fetched sequentially, and results are accumulated in a `pages` array.
+
+Infinite queries are ideal for:
+
+- Infinite scrolling lists
+- "Load More" buttons for paginated data
+- Bi-directional pagination (loading older and newer items)
+- Social media feeds
+- Chat message history
+
+## Defining an Infinite Query
+
+Use `build.infiniteQuery<ResultType, QueryArg, PageParam>()` in your API definition:
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+interface Pokemon {
+  id: string;
+  name: string;
+}
+
+export const pokemonApi = createApi({
+  reducerPath: 'pokemonApi',
+  baseQuery: fetchBaseQuery({ baseUrl: 'https://example.com/pokemon' }),
+  endpoints: (build) => ({
+    getPokemon: build.infiniteQuery<Pokemon[], string, number>({
+      infiniteQueryOptions: {
+        // Required: Initial page parameter
+        initialPageParam: 1,
+        
+        // Required: Calculate next page parameter
+        getNextPageParam: (lastPage, allPages, lastPageParam) => {
+          // Return undefined when there are no more pages
+          return lastPage.length > 0 ? lastPageParam + 1 : undefined;
+        },
+        
+        // Optional: Calculate previous page parameter
+        getPreviousPageParam: (firstPage, allPages, firstPageParam) => {
+          return firstPageParam > 1 ? firstPageParam - 1 : undefined;
+        },
+      },
+      query: ({ queryArg, pageParam }) => `/type/${queryArg}?page=${pageParam}`,
+    }),
+  }),
+});
+
+export const { useGetPokemonInfiniteQuery } = pokemonApi;
+```
+
+### Infinite Query Options
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `initialPageParam` | `PageParam` | ✅ Yes | The page parameter for the first page |
+| `getNextPageParam` | `(lastPage, allPages, lastPageParam) => PageParam \| undefined` | ✅ Yes | Calculates the next page parameter. Return `undefined` for no more pages |
+| `getPreviousPageParam` | `(firstPage, allPages, firstPageParam) => PageParam \| undefined` | ❌ No | Calculates the previous page parameter |
+
+<Warning>
+If `getNextPageParam` or `getPreviousPageParam` returns `undefined`, it indicates there are no more pages in that direction.
+</Warning>
+
+## Basic Usage
+
+The infinite query hook returns a signal with pagination state and methods:
+
+```typescript
+import { Component, computed } from '@angular/core';
+import { useGetPokemonInfiniteQuery } from './api';
+
+@Component({
+  selector: 'app-pokemon-list',
+  standalone: true,
+  template: `
+    @if (pokemonQuery.isLoading()) {
+      <p>Loading...</p>
+    }
+    
+    @for (pokemon of allPokemon(); track pokemon.id) {
+      <div class="pokemon-card">{{ pokemon.name }}</div>
+    }
+    
+    <button 
+      [disabled]="!pokemonQuery.hasNextPage() || pokemonQuery.isFetchingNextPage()"
+      (click)="pokemonQuery.fetchNextPage()">
+      {{ pokemonQuery.isFetchingNextPage() ? 'Loading...' : 'Load More' }}
+    </button>
+  `,
+})
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  
+  // Flatten all pages into a single array
+  allPokemon = computed(() => 
+    this.pokemonQuery.data()?.pages.flat() ?? []
+  );
+}
+```
+
+## Infinite Query State
+
+Infinite queries provide all standard query properties plus pagination-specific state:
+
+### Standard Query Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `data()` | `{ pages: T[], pageParams: PageParam[] } \| undefined` | All fetched pages and their parameters |
+| `isLoading()` | `boolean` | `true` during initial fetch |
+| `isFetching()` | `boolean` | `true` when any request is in flight |
+| `isSuccess()` | `boolean` | `true` when data is available |
+| `isError()` | `boolean` | `true` if the query resulted in an error |
+| `error()` | `SerializedError \| FetchBaseQueryError` | Error object if query failed |
+
+### Pagination Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `hasNextPage()` | `boolean` | `true` if there are more pages to fetch forward |
+| `hasPreviousPage()` | `boolean` | `true` if there are more pages to fetch backward |
+| `isFetchingNextPage()` | `boolean` | `true` while fetching the next page |
+| `isFetchingPreviousPage()` | `boolean` | `true` while fetching the previous page |
+
+### Pagination Methods
+
+| Method | Type | Description |
+|--------|------|-------------|
+| `fetchNextPage()` | `() => Promise` | Fetch the next page of results |
+| `fetchPreviousPage()` | `() => Promise` | Fetch the previous page of results |
+| `refetch(options?)` | `(options?) => Promise` | Refetch all or specific pages |
+
+## Data Structure
+
+The `data()` signal returns an object with two properties:
+
+```typescript
+interface InfiniteData<T, PageParam> {
+  pages: T[];           // Array of page results
+  pageParams: PageParam[];  // Array of page parameters used
+}
+```
+
+### Example
+
+```typescript
+const data = pokemonQuery.data();
+
+console.log(data);
+// {
+//   pages: [
+//     [{ id: '1', name: 'Charmander' }, { id: '2', name: 'Charmeleon' }],  // Page 1
+//     [{ id: '3', name: 'Charizard' }, { id: '4', name: 'Squirtle' }],     // Page 2
+//   ],
+//   pageParams: [1, 2]  // Page parameters used
+// }
+```
+
+## Flattening Pages
+
+Use `computed()` to flatten pages into a single array:
+
+```typescript
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  
+  // Flatten pages into a single array
+  allPokemon = computed(() => {
+    const data = this.pokemonQuery.data();
+    return data?.pages.flat() ?? [];
+  });
+}
+```
+
+## Bi-Directional Pagination
+
+Fetch both forward and backward with `fetchNextPage()` and `fetchPreviousPage()`:
+
+```typescript
+@Component({
+  template: `
+    <button 
+      [disabled]="!pokemonQuery.hasPreviousPage()"
+      (click)="pokemonQuery.fetchPreviousPage()">
+      Load Previous
+    </button>
+    
+    @for (pokemon of allPokemon(); track pokemon.id) {
+      <div>{{ pokemon.name }}</div>
+    }
+    
+    <button 
+      [disabled]="!pokemonQuery.hasNextPage()"
+      (click)="pokemonQuery.fetchNextPage()">
+      Load More
+    </button>
+  `
+})
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  
+  allPokemon = computed(() => 
+    this.pokemonQuery.data()?.pages.flat() ?? []
+  );
+}
+```
+
+## Refetching Pages
+
+The `refetch()` method supports options to control which pages are refetched:
+
+```typescript
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  
+  // Refetch all pages
+  refetchAll() {
+    this.pokemonQuery.refetch();
+  }
+  
+  // Refetch only the first page (default behavior)
+  refetchFirst() {
+    this.pokemonQuery.refetch({ refetchCachedPages: false });
+  }
+  
+  // Refetch all cached pages
+  refetchAllCached() {
+    this.pokemonQuery.refetch({ refetchCachedPages: true });
+  }
+}
+```
+
+### Refetch Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `refetchCachedPages` | `boolean` | `false` | If `true`, refetch all cached pages. If `false`, only refetch the first page |
+
+<Tip>
+Set `refetchCachedPages: true` in the hook options to always refetch all pages by default:
+
+```typescript
+pokemonQuery = useGetPokemonInfiniteQuery('fire', {
+  refetchCachedPages: true,
+});
+```
+</Tip>
+
+## Query Arguments
+
+Infinite queries support the same argument patterns as regular queries:
+
+### Static Arguments
+
+```typescript
+pokemonQuery = useGetPokemonInfiniteQuery('fire');
+```
+
+### Signal Arguments
+
+```typescript
+export class PokemonListComponent {
+  pokemonType = input.required<string>();
+  pokemonQuery = useGetPokemonInfiniteQuery(this.pokemonType);
+}
+```
+
+### Function Arguments
+
+```typescript
+export class PokemonListComponent {
+  pokemonType = signal('fire');
+  enabledOnly = signal(true);
+  
+  pokemonQuery = useGetPokemonInfiniteQuery(() => ({
+    type: this.pokemonType(),
+    enabled: this.enabledOnly(),
+  }));
+}
+```
+
+## Infinite Query Options
+
+Customize infinite query behavior:
+
+```typescript
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire', {
+    // Initial page parameter for the first fetch
+    initialPageParam: 0,
+    
+    // Refetch all cached pages on refetch()
+    refetchCachedPages: true,
+    
+    // Standard query options
+    pollingInterval: 5000,
+    refetchOnFocus: true,
+    refetchOnReconnect: true,
+  });
+}
+```
+
+## Infinite Scroll Example
+
+Implement infinite scrolling with the Intersection Observer API:
+
+```typescript
+import { Component, ElementRef, computed, effect, viewChild } from '@angular/core';
+import { useGetPokemonInfiniteQuery } from './api';
+
+@Component({
+  selector: 'app-pokemon-infinite-scroll',
+  standalone: true,
+  template: `
+    <div class="pokemon-list">
+      @for (pokemon of allPokemon(); track pokemon.id) {
+        <div class="pokemon-card">{{ pokemon.name }}</div>
+      }
+      
+      @if (pokemonQuery.hasNextPage()) {
+        <div #sentinel class="sentinel">
+          @if (pokemonQuery.isFetchingNextPage()) {
+            <p>Loading more...</p>
+          }
+        </div>
+      }
+    </div>
+  `,
+})
+export class PokemonInfiniteScrollComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  sentinel = viewChild<ElementRef<HTMLElement>>('sentinel');
+  
+  allPokemon = computed(() => 
+    this.pokemonQuery.data()?.pages.flat() ?? []
+  );
+  
+  constructor() {
+    effect((onCleanup) => {
+      const sentinelEl = this.sentinel()?.nativeElement;
+      if (!sentinelEl) return;
+      
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting && this.pokemonQuery.hasNextPage()) {
+            this.pokemonQuery.fetchNextPage();
+          }
+        },
+        { threshold: 1.0 }
+      );
+      
+      observer.observe(sentinelEl);
+      onCleanup(() => observer.disconnect());
+    });
+  }
+}
+```
+
+## Advanced Example: Cursor-Based Pagination
+
+Use cursor-based pagination for more robust infinite scrolling:
+
+```typescript
+interface PokemonPage {
+  results: Pokemon[];
+  nextCursor?: string;
+  prevCursor?: string;
+}
+
+export const pokemonApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'https://pokeapi.co/api/v2' }),
+  endpoints: (build) => ({
+    getPokemon: build.infiniteQuery<PokemonPage, string, string | null>({
+      infiniteQueryOptions: {
+        initialPageParam: null,
+        getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+        getPreviousPageParam: (firstPage) => firstPage.prevCursor ?? undefined,
+      },
+      query: ({ queryArg: type, pageParam }) => ({
+        url: `/type/${type}`,
+        params: { cursor: pageParam ?? undefined },
+      }),
+    }),
+  }),
+});
+```
+
+## TypeScript Type Signatures
+
+### Infinite Query Hook Type
+
+```typescript
+type UseInfiniteQuery<ResultType, QueryArg, PageParam> = (
+  arg: QueryArg | Signal<QueryArg> | (() => QueryArg),
+  options?: UseInfiniteQueryOptions<ResultType, PageParam>
+) => UseInfiniteQueryStateDefaultResult<ResultType, PageParam>;
+
+interface UseInfiniteQueryStateDefaultResult<T, PageParam> {
+  // Data
+  data: Signal<{ pages: T[], pageParams: PageParam[] } | undefined>;
+  currentData: Signal<{ pages: T[], pageParams: PageParam[] } | undefined>;
+  
+  // Standard query state
+  isLoading: Signal<boolean>;
+  isFetching: Signal<boolean>;
+  isSuccess: Signal<boolean>;
+  isError: Signal<boolean>;
+  error: Signal<SerializedError | FetchBaseQueryError | undefined>;
+  
+  // Pagination state
+  hasNextPage: Signal<boolean>;
+  hasPreviousPage: Signal<boolean>;
+  isFetchingNextPage: Signal<boolean>;
+  isFetchingPreviousPage: Signal<boolean>;
+  
+  // Pagination methods
+  fetchNextPage: () => Promise<InfiniteQueryActionCreatorResult<T>>;
+  fetchPreviousPage: () => Promise<InfiniteQueryActionCreatorResult<T>>;
+  refetch: (options?: { refetchCachedPages?: boolean }) => Promise<InfiniteQueryActionCreatorResult<T>>;
+}
+```
+
+## Best Practices
+
+<CodeGroup>
+```typescript Flatten Pages with computed
+// ✅ Good - Efficient derived state
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  
+  allPokemon = computed(() => 
+    this.pokemonQuery.data()?.pages.flat() ?? []
+  );
+}
+```
+
+```typescript Check hasNextPage Before Fetching
+// ✅ Good - Prevent unnecessary requests
+loadMore() {
+  if (this.pokemonQuery.hasNextPage() && !this.pokemonQuery.isFetchingNextPage()) {
+    this.pokemonQuery.fetchNextPage();
+  }
+}
+```
+
+```typescript Use Intersection Observer for Infinite Scroll
+// ✅ Good - Performant infinite scrolling
+const observer = new IntersectionObserver((entries) => {
+  if (entries[0].isIntersecting && this.pokemonQuery.hasNextPage()) {
+    this.pokemonQuery.fetchNextPage();
+  }
+});
+```
+
+```typescript Return undefined for No More Pages
+// ✅ Good - Proper page param calculation
+getNextPageParam: (lastPage, allPages, lastPageParam) => {
+  return lastPage.length > 0 ? lastPageParam + 1 : undefined;
+}
+```
+</CodeGroup>
+
+## Related Concepts
+
+- [Queries](/concepts/queries) - Basic data fetching
+- [Lazy Queries](/concepts/lazy-queries) - Manual query triggering
+- [Cache Invalidation](/concepts/cache-invalidation) - Keep your cache fresh

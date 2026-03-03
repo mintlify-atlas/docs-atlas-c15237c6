@@ -1,0 +1,418 @@
+---
+title: "Infinite Scroll"
+description: "Implement infinite scroll and load more patterns with infinite queries"
+---
+
+This guide demonstrates how to implement infinite scroll and "load more" patterns using infinite queries, which cache multiple pages within a single cache entry.
+
+## Infinite Query Pattern
+
+Use `build.infiniteQuery()` to define an endpoint that supports pagination:
+
+```typescript app/pokemon/api.ts
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+type Pokemon = { id: string; name: string };
+
+export const pokemonApi = createApi({
+  reducerPath: 'pokemonApi',
+  baseQuery: fetchBaseQuery({ baseUrl: 'https://example.com/pokemon' }),
+  endpoints: (build) => ({
+    getPokemon: build.infiniteQuery<Pokemon[], string, number>({
+      infiniteQueryOptions: {
+        initialPageParam: 1,
+        getNextPageParam: (lastPage, allPages, lastPageParam) => 
+          lastPageParam + 1,
+        getPreviousPageParam: (firstPage, allPages, firstPageParam) =>
+          firstPageParam > 1 ? firstPageParam - 1 : undefined,
+      },
+      query: ({ queryArg, pageParam }) => `/type/${queryArg}?page=${pageParam}`,
+    }),
+  }),
+});
+
+export const { useGetPokemonInfiniteQuery } = pokemonApi;
+```
+
+<Note>
+**Infinite queries** cache all pages together, making them ideal for "load more" buttons and infinite scroll. The `data` field contains a `{ pages, pageParams }` structure.
+</Note>
+
+## Load More Button
+
+Implement a "Load More" button that appends new results:
+
+```typescript app/pokemon/pokemon-list.component.ts
+import { ChangeDetectionStrategy, Component, computed } from '@angular/core';
+import { useGetPokemonInfiniteQuery } from './api';
+
+@Component({
+  selector: 'app-pokemon-list',
+  standalone: true,
+  template: `
+    <section>
+      <h1>Pokemon - {{ pokemonType }}</h1>
+      
+      @if (pokemonQuery.isLoading()) {
+        <p>Loading...</p>
+      }
+      
+      <ul>
+        @for (pokemon of allPokemon(); track pokemon.id) {
+          <li>{{ pokemon.name }}</li>
+        }
+      </ul>
+      
+      @if (pokemonQuery.hasNextPage()) {
+        <button
+          [disabled]="pokemonQuery.isFetchingNextPage()"
+          (click)="loadMore()"
+        >
+          {{ pokemonQuery.isFetchingNextPage() ? 'Loading...' : 'Load More' }}
+        </button>
+      }
+      
+      @if (!pokemonQuery.hasNextPage() && !pokemonQuery.isLoading()) {
+        <p>No more pokemon to load</p>
+      }
+    </section>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class PokemonListComponent {
+  readonly pokemonType = 'fire';
+  readonly pokemonQuery = useGetPokemonInfiniteQuery(this.pokemonType);
+
+  // Flatten all pages into a single array
+  readonly allPokemon = computed(() => 
+    this.pokemonQuery.data()?.pages.flat() ?? []
+  );
+
+  loadMore(): void {
+    this.pokemonQuery.fetchNextPage();
+  }
+}
+```
+
+## Infinite Scroll with Intersection Observer
+
+Automatically load more items when scrolling to the bottom:
+
+```typescript app/posts/infinite-posts.component.ts
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  signal,
+  viewChild,
+} from '@angular/core';
+import { useGetPostsInfiniteQuery } from './api';
+
+@Component({
+  selector: 'app-infinite-posts',
+  standalone: true,
+  template: `
+    <section>
+      <h1>All Posts</h1>
+      
+      <ul>
+        @for (post of allPosts(); track post.id) {
+          <li>
+            <h3>{{ post.name }}</h3>
+            <p>{{ post.content }}</p>
+          </li>
+        }
+      </ul>
+      
+      <div #sentinel class="sentinel"></div>
+      
+      @if (postsQuery.isFetchingNextPage()) {
+        <div class="loading-spinner">Loading more posts...</div>
+      }
+      
+      @if (!postsQuery.hasNextPage() && !postsQuery.isLoading()) {
+        <p class="end-message">You've reached the end!</p>
+      }
+    </section>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class InfinitePostsComponent {
+  readonly postsQuery = useGetPostsInfiniteQuery(undefined);
+  readonly sentinel = viewChild<ElementRef>('sentinel');
+
+  readonly allPosts = computed(() => 
+    this.postsQuery.data()?.pages.flat() ?? []
+  );
+
+  constructor() {
+    // Set up intersection observer for infinite scroll
+    effect((onCleanup) => {
+      const element = this.sentinel()?.nativeElement;
+      if (!element) return;
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const [entry] = entries;
+          if (
+            entry.isIntersecting &&
+            this.postsQuery.hasNextPage() &&
+            !this.postsQuery.isFetchingNextPage()
+          ) {
+            this.postsQuery.fetchNextPage();
+          }
+        },
+        { rootMargin: '100px' } // Start loading 100px before reaching bottom
+      );
+
+      observer.observe(element);
+      onCleanup(() => observer.disconnect());
+    });
+  }
+}
+```
+
+<Tip>
+Set `rootMargin: '100px'` on the IntersectionObserver to start loading the next page slightly before the user reaches the bottom, creating a seamless experience.
+</Tip>
+
+## API Definition for Infinite Scroll
+
+```typescript app/posts/api.ts
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+interface Post {
+  id: number;
+  name: string;
+  content: string;
+}
+
+interface PostsResponse {
+  posts: Post[];
+  nextPage?: number;
+}
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    getPosts: build.infiniteQuery<PostsResponse, void, number>({
+      infiniteQueryOptions: {
+        initialPageParam: 1,
+        getNextPageParam: (lastPage) => lastPage.nextPage,
+        getPreviousPageParam: (firstPage, allPages, firstPageParam) =>
+          firstPageParam > 1 ? firstPageParam - 1 : undefined,
+      },
+      query: ({ pageParam }) => ({
+        url: '/posts',
+        params: { page: pageParam, limit: 20 },
+      }),
+      providesTags: (result) =>
+        result
+          ? [
+              ...result.pages.flatMap((page) => 
+                page.posts.map(({ id }) => ({ type: 'Posts', id }) as const)
+              ),
+              { type: 'Posts', id: 'INFINITE-LIST' },
+            ]
+          : [{ type: 'Posts', id: 'INFINITE-LIST' }],
+    }),
+  }),
+});
+
+export const { useGetPostsInfiniteQuery } = postsApi;
+```
+
+## Bidirectional Infinite Scroll
+
+Load content in both directions:
+
+```typescript app/posts/bidirectional-scroll.component.ts
+import { ChangeDetectionStrategy, Component, computed } from '@angular/core';
+import { useGetPostsInfiniteQuery } from './api';
+
+@Component({
+  selector: 'app-bidirectional-scroll',
+  standalone: true,
+  template: `
+    <section>
+      @if (postsQuery.hasPreviousPage()) {
+        <button
+          [disabled]="postsQuery.isFetchingPreviousPage()"
+          (click)="loadPrevious()"
+        >
+          {{ postsQuery.isFetchingPreviousPage() ? 'Loading...' : 'Load Previous' }}
+        </button>
+      }
+      
+      <ul>
+        @for (post of allPosts(); track post.id) {
+          <li>{{ post.name }}</li>
+        }
+      </ul>
+      
+      @if (postsQuery.hasNextPage()) {
+        <button
+          [disabled]="postsQuery.isFetchingNextPage()"
+          (click)="loadNext()"
+        >
+          {{ postsQuery.isFetchingNextPage() ? 'Loading...' : 'Load Next' }}
+        </button>
+      }
+    </section>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class BidirectionalScrollComponent {
+  readonly postsQuery = useGetPostsInfiniteQuery(undefined, {
+    initialPageParam: 5, // Start from middle page
+  });
+
+  readonly allPosts = computed(() => 
+    this.postsQuery.data()?.pages.flatMap((page) => page.posts) ?? []
+  );
+
+  loadNext(): void {
+    this.postsQuery.fetchNextPage();
+  }
+
+  loadPrevious(): void {
+    this.postsQuery.fetchPreviousPage();
+  }
+}
+```
+
+## Refetching All Pages
+
+Control whether to refetch all pages or just the first:
+
+```typescript
+export class InfinitePostsComponent {
+  readonly postsQuery = useGetPostsInfiniteQuery(undefined, {
+    // When true (default), refetches all cached pages on invalidation
+    refetchCachedPages: true,
+  });
+
+  // Manually refetch all pages
+  refreshAll(): void {
+    this.postsQuery.refetch({ refetchCachedPages: true });
+  }
+
+  // Refetch only first page
+  refreshFirst(): void {
+    this.postsQuery.refetch({ refetchCachedPages: false });
+  }
+}
+```
+
+<Note>
+When `refetchCachedPages: true`, tag invalidation will sequentially refetch all pages currently in the cache. Set to `false` to only refetch the first page.
+</Note>
+
+## Data Structure
+
+Infinite queries return a special data structure:
+
+```typescript
+interface InfiniteData<TData, TPageParam> {
+  pages: TData[];        // Array of page responses
+  pageParams: TPageParam[]; // Array of page parameters used
+}
+
+// Example:
+const data = pokemonQuery.data();
+// {
+//   pages: [
+//     [{ id: '1', name: 'Charmander' }, ...],  // Page 1
+//     [{ id: '11', name: 'Metapod' }, ...],    // Page 2
+//   ],
+//   pageParams: [1, 2]
+// }
+```
+
+## Query State Properties
+
+Infinite queries provide additional state:
+
+```typescript
+const query = useGetPostsInfiniteQuery(undefined);
+
+// Standard query states
+query.isLoading()      // First page loading
+query.isFetching()     // Any page loading
+query.isError()        // Query error
+query.data()           // InfiniteData structure
+
+// Infinite query specific
+query.hasNextPage()           // More pages available
+query.hasPreviousPage()       // Previous pages available
+query.isFetchingNextPage()    // Loading next page
+query.isFetchingPreviousPage() // Loading previous page
+
+// Methods
+query.fetchNextPage()     // Load next page
+query.fetchPreviousPage() // Load previous page
+query.refetch({ refetchCachedPages: true }) // Refetch pages
+```
+
+## Comparison with Lazy Queries
+
+<CodeGroup>
+
+```typescript Infinite Query (for infinite scroll)
+// All pages cached together
+const query = useGetPostsInfiniteQuery(undefined);
+const allPosts = computed(() => query.data()?.pages.flat() ?? []);
+query.fetchNextPage();
+
+// ✅ Best for: Infinite scroll, load more
+// ✅ All pages in one cache entry
+// ✅ Built-in pagination methods
+```
+
+```typescript Lazy Query (for discrete pagination)
+// Each page cached separately
+const query = useLazyGetPostsQuery();
+query({ page: 1 }, { preferCacheValue: true });
+query({ page: 2 }, { preferCacheValue: true });
+
+// ✅ Best for: Page-by-page navigation
+// ✅ Independent page caches
+// ✅ More control over refetching
+```
+
+</CodeGroup>
+
+## Best Practices
+
+### Performance
+
+- Use `computed()` to flatten pages once rather than in the template
+- Implement virtual scrolling for very large lists (e.g., with `@angular/cdk/scrolling`)
+- Set appropriate `rootMargin` on IntersectionObserver
+
+### User Experience
+
+- Show loading states for `isFetchingNextPage()`
+- Display "end of list" message when `!hasNextPage()`
+- Consider skeleton loaders for initial load
+- Preserve scroll position when navigating away and back
+
+### Cache Management
+
+```typescript
+// ✅ Use specific tags for infinite queries
+providesTags: [{ type: 'Posts', id: 'INFINITE-LIST' }]
+
+// ✅ Invalidate to refetch all pages
+invalidatesTags: [{ type: 'Posts', id: 'INFINITE-LIST' }]
+
+// ⚠️ Consider cache size for very long lists
+// Use pagination for better memory management
+```
+
+<Tip>
+For traditional page-by-page navigation, use [Pagination](/examples/pagination) with lazy queries instead of infinite queries.
+</Tip>

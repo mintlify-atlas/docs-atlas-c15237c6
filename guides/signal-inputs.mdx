@@ -1,0 +1,563 @@
+---
+title: Signal Inputs
+description: Use ngrx-rtk-query with Angular router inputs and signal parameters
+---
+
+## Overview
+
+ngrx-rtk-query hooks accept signals, functions, or static values as parameters. This makes them perfect for working with Angular's signal inputs, especially with router parameters.
+
+## Signal Inputs with Queries
+
+Queries automatically react to signal input changes, refetching data when the input value updates.
+
+### Basic Usage
+
+<Steps>
+  <Step title="Define the API endpoint">
+    ```typescript api.ts
+    import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+    export interface Post {
+      id: number;
+      name: string;
+      content: string;
+    }
+
+    export const postsApi = createApi({
+      baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+      endpoints: (build) => ({
+        getPost: build.query<Post, number>({
+          query: (id) => `/posts/${id}`,
+          providesTags: (result, error, id) => [{ type: 'Posts', id }],
+        }),
+      }),
+    });
+
+    export const { useGetPostQuery } = postsApi;
+    ```
+  </Step>
+
+  <Step title="Use with signal input">
+    ```typescript post-details.component.ts
+    import { Component, input, numberAttribute } from '@angular/core';
+    import { useGetPostQuery } from './api';
+
+    @Component({
+      selector: 'app-post-details',
+      template: `
+        <h1>{{ postQuery.data()?.name }}</h1>
+        @if (postQuery.isLoading()) {
+          <p>Loading...</p>
+        }
+        @if (postQuery.data(); as post) {
+          <div>{{ post.content }}</div>
+        }
+      `,
+    })
+    export class PostDetailsComponent {
+      // Signal input from router
+      id = input.required({ transform: numberAttribute });
+      
+      // Query automatically refetches when id changes
+      postQuery = useGetPostQuery(this.id);
+    }
+    ```
+  </Step>
+
+  <Step title="Configure route">
+    ```typescript app.routes.ts
+    import { Route } from '@angular/router';
+
+    export const appRoutes: Route[] = [
+      {
+        path: 'posts/:id',
+        loadComponent: () => import('./post-details.component')
+          .then((c) => c.PostDetailsComponent),
+      },
+    ];
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  When the route parameter changes (e.g., navigating from `/posts/1` to `/posts/2`), the query automatically refetches with the new ID.
+</Note>
+
+## Router Input Binding
+
+Enable `withComponentInputBinding()` to automatically bind route parameters to component inputs:
+
+```typescript app.config.ts
+import { provideRouter, withComponentInputBinding } from '@angular/router';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideRouter(
+      appRoutes,
+      withComponentInputBinding(), // Enable automatic binding
+    ),
+  ],
+};
+```
+
+## Signal Parameter Patterns
+
+### Direct Signal
+
+Pass a signal directly to the hook:
+
+```typescript
+id = input.required<number>();
+postQuery = useGetPostQuery(this.id);
+```
+
+### Function (Computed)
+
+Use a function for derived values:
+
+```typescript
+id = input.required<number>();
+offset = input<number>(0);
+
+// Derived parameter
+postQuery = useGetPostQuery(() => this.id() + this.offset());
+```
+
+### With skipToken
+
+Conditionally skip queries when a signal is undefined:
+
+```typescript
+import { skipToken } from 'ngrx-rtk-query';
+
+character = input<Character | undefined>();
+
+// Only query when character exists
+locationQuery = useGetLocationQuery(
+  () => this.character()?.currentLocation ?? skipToken
+);
+```
+
+<Warning>
+  Without `skipToken`, the query would be called with `undefined`, potentially causing errors.
+</Warning>
+
+## Optional Inputs
+
+Handle optional inputs gracefully with `skipToken`:
+
+<Tabs>
+  <Tab title="Optional with Default">
+    ```typescript
+    userId = input<number>(); // Optional, defaults to undefined
+    
+    userQuery = useGetUserQuery(
+      () => this.userId() ?? skipToken
+    );
+    ```
+  </Tab>
+
+  <Tab title="Optional with Fallback">
+    ```typescript
+    userId = input<number>();
+    
+    // Use current user ID as fallback
+    userQuery = useGetUserQuery(
+      () => this.userId() ?? this.currentUserId()
+    );
+    ```
+  </Tab>
+
+  <Tab title="Required Transform">
+    ```typescript
+    // Transform string to number, required
+    id = input.required({ transform: numberAttribute });
+    
+    postQuery = useGetPostQuery(this.id);
+    ```
+  </Tab>
+</Tabs>
+
+## Multiple Signal Inputs
+
+Combine multiple signal inputs in a query:
+
+```typescript
+import { Component, input } from '@angular/core';
+import { useGetPostsQuery } from './api';
+
+@Component({
+  template: `
+    @for (post of postsQuery.data(); track post.id) {
+      <div>{{ post.name }}</div>
+    }
+  `,
+})
+export class PostsListComponent {
+  page = input<number>(1);
+  limit = input<number>(10);
+  search = input<string>('');
+  
+  // Combine multiple signals
+  postsQuery = useGetPostsQuery(() => ({
+    page: this.page(),
+    limit: this.limit(),
+    search: this.search(),
+  }));
+}
+```
+
+## Query Options with Signals
+
+Signal parameters work with query options:
+
+```typescript
+id = input.required<number>();
+
+postQuery = useGetPostQuery(this.id, {
+  pollingInterval: 5000, // Poll every 5 seconds
+  skip: false,
+  refetchOnMountOrArgChange: true,
+});
+```
+
+### Dynamic Options
+
+Options can also be signals or functions:
+
+```typescript
+id = input.required<number>();
+pollingEnabled = input<boolean>(false);
+
+postQuery = useGetPostQuery(
+  this.id,
+  () => ({
+    pollingInterval: this.pollingEnabled() ? 5000 : 0,
+  })
+);
+```
+
+## Skip Queries Conditionally
+
+Use the `skip` option to prevent queries from running:
+
+<CodeGroup>
+  ```typescript With skip option
+  id = input.required<number>();
+  enabled = input<boolean>(false);
+  
+  // Only query when enabled
+  postQuery = useGetPostQuery(
+    this.id,
+    () => ({ skip: !this.enabled() })
+  );
+  ```
+
+  ```typescript With skipToken
+  id = input<number | undefined>();
+  
+  // Only query when id exists
+  postQuery = useGetPostQuery(
+    () => this.id() ?? skipToken
+  );
+  ```
+</CodeGroup>
+
+<Note>
+  `skipToken` is preferred when the parameter itself is conditional. Use `skip` option when you want to control execution based on other state.
+</Note>
+
+## Nested/Relational Data
+
+Load related data based on signal inputs:
+
+```typescript
+import { Component, input } from '@angular/core';
+import { useGetCharacterQuery, useGetLocationQuery } from './api';
+
+@Component({
+  template: `
+    <h2>{{ characterQuery.data()?.name }}</h2>
+    <p>Location: {{ locationQuery.data()?.name }}</p>
+  `,
+})
+export class CharacterCardComponent {
+  characterId = input.required<number>();
+  
+  // Load character
+  characterQuery = useGetCharacterQuery(this.characterId);
+  
+  // Load character's location when character data is available
+  locationQuery = useGetLocationQuery(
+    () => this.characterQuery.data()?.currentLocation ?? skipToken
+  );
+}
+```
+
+## Fine-Grained Reactivity
+
+ngrx-rtk-query provides fine-grained signal access for optimal change detection:
+
+<Tabs>
+  <Tab title="Fine-Grained (Recommended)">
+    ```typescript
+    @Component({
+      template: `
+        @if (postQuery.isLoading()) {
+          <p>Loading...</p>
+        }
+        @if (postQuery.data(); as post) {
+          <h1>{{ post.name }}</h1>
+        }
+      `,
+    })
+    export class PostComponent {
+      postQuery = useGetPostQuery(1);
+      
+      // Template only re-renders when isLoading or data changes
+      // Not when other properties like isFetching change
+    }
+    ```
+  </Tab>
+
+  <Tab title="Coarse-Grained">
+    ```typescript
+    @Component({
+      template: `
+        @if (postQuery().isLoading) {
+          <p>Loading...</p>
+        }
+        @if (postQuery().data; as post) {
+          <h1>{{ post.name }}</h1>
+        }
+      `,
+    })
+    export class PostComponent {
+      postQuery = useGetPostQuery(1);
+      
+      // Template re-renders when ANY property changes
+      // Less efficient
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  Use `postQuery.property()` instead of `postQuery().property` for better performance.
+</Note>
+
+## Polling with Signal Inputs
+
+Combine polling with signal inputs for real-time data:
+
+```typescript
+import { Component, input, numberAttribute } from '@angular/core';
+import { useGetPostQuery } from './api';
+
+@Component({
+  template: `
+    <h1>{{ postQuery.data()?.name }}</h1>
+    @if (postQuery.isFetching()) {
+      <span class="badge">Updating...</span>
+    }
+    <button (click)="postQuery.refetch()">Refresh Now</button>
+  `,
+})
+export class PostDetailsComponent {
+  id = input.required({ transform: numberAttribute });
+  
+  postQuery = useGetPostQuery(this.id, {
+    pollingInterval: 5000, // Poll every 5 seconds
+  });
+}
+```
+
+## Advanced Patterns
+
+### Debounced Search
+
+Debounce signal inputs for search queries:
+
+```typescript
+import { Component, signal, effect } from '@angular/core';
+import { useGetPostsQuery } from './api';
+
+@Component({
+  template: `
+    <input 
+      [ngModel]="searchInput()" 
+      (ngModelChange)="searchInput.set($event)"
+      placeholder="Search posts..."
+    />
+    @for (post of postsQuery.data(); track post.id) {
+      <div>{{ post.name }}</div>
+    }
+  `,
+})
+export class SearchComponent {
+  searchInput = signal('');
+  debouncedSearch = signal('');
+  
+  #debounceTimer?: ReturnType<typeof setTimeout>;
+  
+  constructor() {
+    effect(() => {
+      const value = this.searchInput();
+      clearTimeout(this.#debounceTimer);
+      this.#debounceTimer = setTimeout(() => {
+        this.debouncedSearch.set(value);
+      }, 300);
+    });
+  }
+  
+  postsQuery = useGetPostsQuery(
+    () => ({ search: this.debouncedSearch() })
+  );
+}
+```
+
+### Dependent Queries
+
+Chain queries based on previous results:
+
+```typescript
+import { Component, input } from '@angular/core';
+import { useGetUserQuery, useGetPostsQuery } from './api';
+import { skipToken } from 'ngrx-rtk-query';
+
+@Component({
+  template: `
+    <h2>{{ userQuery.data()?.name }}'s Posts</h2>
+    @for (post of postsQuery.data(); track post.id) {
+      <div>{{ post.title }}</div>
+    }
+  `,
+})
+export class UserPostsComponent {
+  userId = input.required<number>();
+  
+  // First query: load user
+  userQuery = useGetUserQuery(this.userId);
+  
+  // Second query: load user's posts (depends on first query)
+  postsQuery = useGetPostsQuery(
+    () => this.userQuery.data()?.id ?? skipToken
+  );
+}
+```
+
+## Testing with Signal Inputs
+
+Test components with signal inputs:
+
+```typescript
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { PostDetailsComponent } from './post-details.component';
+import { provideStoreApi } from 'ngrx-rtk-query';
+import { postsApi } from './api';
+
+describe('PostDetailsComponent', () => {
+  let component: PostDetailsComponent;
+  let fixture: ComponentFixture<PostDetailsComponent>;
+  
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [PostDetailsComponent],
+      providers: [provideStore(), provideStoreApi(postsApi)],
+    });
+    
+    fixture = TestBed.createComponent(PostDetailsComponent);
+    component = fixture.componentInstance;
+    
+    // Set input value
+    fixture.componentRef.setInput('id', 1);
+    fixture.detectChanges();
+  });
+  
+  it('should load post data', async () => {
+    await fixture.whenStable();
+    expect(component.postQuery.data()).toBeDefined();
+  });
+  
+  it('should refetch when id changes', async () => {
+    await fixture.whenStable();
+    const firstPost = component.postQuery.data();
+    
+    // Change input
+    fixture.componentRef.setInput('id', 2);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    
+    expect(component.postQuery.data()).not.toBe(firstPost);
+  });
+});
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Use signal inputs for route parameters">
+    Enable `withComponentInputBinding()` and use `input()` instead of `ActivatedRoute`.
+  </Step>
+
+  <Step title="Prefer skipToken for optional parameters">
+    Use `skipToken` instead of passing `undefined` to prevent errors.
+  </Step>
+
+  <Step title="Use fine-grained signals">
+    Access properties as `query.data()` instead of `query().data` for better performance.
+  </Step>
+
+  <Step title="Transform route parameters">
+    Use `numberAttribute` or custom transforms for type safety:
+    ```typescript
+    id = input.required({ transform: numberAttribute });
+    ```
+  </Step>
+
+  <Step title="Combine signals in functions">
+    When using multiple signals, wrap them in a function:
+    ```typescript
+    query = useGetDataQuery(() => ({ id: this.id(), type: this.type() }));
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Query not refetching on input change
+
+<Warning>
+  Ensure you're passing a signal or function, not a static value.
+</Warning>
+
+```typescript
+// ❌ Wrong - static value
+postQuery = useGetPostQuery(this.id());
+
+// ✅ Correct - signal
+postQuery = useGetPostQuery(this.id);
+
+// ✅ Also correct - function
+postQuery = useGetPostQuery(() => this.id());
+```
+
+### Route parameters not binding
+
+Ensure `withComponentInputBinding()` is configured:
+
+```typescript
+provideRouter(appRoutes, withComponentInputBinding());
+```
+
+### Type errors with transforms
+
+Use the correct attribute transformer:
+
+```typescript
+import { numberAttribute, booleanAttribute } from '@angular/core';
+
+id = input.required({ transform: numberAttribute });
+enabled = input({ transform: booleanAttribute });
+```

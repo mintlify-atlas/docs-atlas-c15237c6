@@ -1,0 +1,305 @@
+---
+title: createApi
+description: Main function to create an RTK Query API with Angular hooks integration
+---
+
+`createApi` is the core function of ngrx-rtk-query that generates an API slice with Angular-compatible hooks for queries and mutations. It wraps RTK Query's `buildCreateApi` with Angular-specific hooks module.
+
+## Function Signature
+
+```typescript
+function createApi<
+  Definitions extends EndpointDefinitions
+>(
+  options: CreateApiOptions<Definitions>
+): Api<Definitions> & { initApiStore: (setupFn: () => AngularHooksModuleOptions) => void }
+```
+
+## Parameters
+
+<ParamField path="options" type="CreateApiOptions" required>
+  Configuration object for the API
+
+  <Expandable title="properties">
+    <ParamField path="baseQuery" type="BaseQueryFn" required>
+      A function that handles requests to your API. Typically use `fetchBaseQuery`.
+    </ParamField>
+
+    <ParamField path="endpoints" type="(build: EndpointBuilder) => Endpoints" required>
+      A function that receives a builder object and returns an object of endpoint definitions.
+    </ParamField>
+
+    <ParamField path="reducerPath" type="string" default="'api'">
+      The key under which the API state will be stored in the Redux store.
+    </ParamField>
+
+    <ParamField path="tagTypes" type="string[]" default="[]">
+      An array of tag type strings that are used for cache invalidation.
+    </ParamField>
+
+    <ParamField path="keepUnusedDataFor" type="number" default="60">
+      Time in seconds to keep unused data cached.
+    </ParamField>
+
+    <ParamField path="refetchOnMountOrArgChange" type="boolean | number" default="false">
+      Whether to refetch on component mount or argument change. Can be set to a number (in seconds) to refetch if data is older than that.
+    </ParamField>
+
+    <ParamField path="refetchOnFocus" type="boolean" default="false">
+      Whether to refetch when the browser window regains focus.
+    </ParamField>
+
+    <ParamField path="refetchOnReconnect" type="boolean" default="false">
+      Whether to refetch when network connection is restored.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Return Value
+
+<ResponseField name="Api" type="object">
+  An API object with generated hooks and utilities
+
+  <Expandable title="properties">
+    <ResponseField name="endpoints" type="object">
+      Object containing all defined endpoints with their hooks.
+    </ResponseField>
+
+    <ResponseField name="useXxxQuery" type="function">
+      Auto-generated query hooks for each query endpoint (e.g., `useGetPostsQuery`).
+    </ResponseField>
+
+    <ResponseField name="useXxxMutation" type="function">
+      Auto-generated mutation hooks for each mutation endpoint (e.g., `useAddPostMutation`).
+    </ResponseField>
+
+    <ResponseField name="useLazyXxxQuery" type="function">
+      Auto-generated lazy query hooks for manual query triggering.
+    </ResponseField>
+
+    <ResponseField name="useXxxInfiniteQuery" type="function">
+      Auto-generated infinite query hooks for paginated data (if endpoint is defined as infinite query).
+    </ResponseField>
+
+    <ResponseField name="util" type="object">
+      Utility functions for cache management and manual operations.
+    </ResponseField>
+
+    <ResponseField name="reducerPath" type="string">
+      The reducer path specified in options.
+    </ResponseField>
+
+    <ResponseField name="reducer" type="Reducer">
+      The reducer function to be added to the store.
+    </ResponseField>
+
+    <ResponseField name="middleware" type="Middleware">
+      The middleware to be added to the store.
+    </ResponseField>
+
+    <ResponseField name="initApiStore" type="function">
+      Internal function used by store providers to initialize the API.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Usage Examples
+
+### Basic API Definition
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+interface Post {
+  id: number;
+  title: string;
+  content: string;
+}
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'https://api.example.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({
+      query: () => ({ url: '/posts' }),
+      providesTags: (result) =>
+        result
+          ? [...result.map(({ id }) => ({ type: 'Posts', id })), { type: 'Posts', id: 'LIST' }]
+          : [{ type: 'Posts', id: 'LIST' }],
+    }),
+    getPost: build.query<Post, number>({
+      query: (id) => `/posts/${id}`,
+      providesTags: (result, error, id) => [{ type: 'Posts', id }],
+    }),
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({
+        url: '/posts',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+    updatePost: build.mutation<Post, Partial<Post>>({
+      query: (data) => {
+        const { id, ...body } = data;
+        return {
+          url: `/posts/${id}`,
+          method: 'PUT',
+          body,
+        };
+      },
+      invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+    }),
+    deletePost: build.mutation<{ success: boolean; id: number }, number>({
+      query: (id) => ({
+        url: `/posts/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+  }),
+});
+
+// Export generated hooks
+export const {
+  useGetPostsQuery,
+  useGetPostQuery,
+  useAddPostMutation,
+  useUpdatePostMutation,
+  useDeletePostMutation,
+} = postsApi;
+```
+
+### Using Generated Hooks in Components
+
+```typescript
+import { Component, ChangeDetectionStrategy } from '@angular/core';
+import { useGetPostsQuery, useAddPostMutation } from './api';
+
+@Component({
+  selector: 'app-posts-list',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    @if (postsQuery.isLoading()) {
+      <p>Loading posts...</p>
+    }
+    @if (postsQuery.error(); as error) {
+      <p>Error: {{ error.message }}</p>
+    }
+    @if (postsQuery.data(); as posts) {
+      <ul>
+        @for (post of posts; track post.id) {
+          <li>{{ post.title }}</li>
+        }
+      </ul>
+    }
+    <button 
+      [disabled]="addPost.isLoading()" 
+      (click)="createNewPost()">
+      Add Post
+    </button>
+  `,
+})
+export class PostsListComponent {
+  postsQuery = useGetPostsQuery();
+  addPost = useAddPostMutation();
+
+  createNewPost() {
+    this.addPost({ title: 'New Post', content: 'Hello World' })
+      .unwrap()
+      .then(() => console.log('Post created!'))
+      .catch((error) => console.error('Failed to create post:', error));
+  }
+}
+```
+
+### With Query Options
+
+```typescript
+import { Component, signal } from '@angular/core';
+import { skipToken } from '@reduxjs/toolkit/query';
+import { useGetPostQuery } from './api';
+
+@Component({
+  selector: 'app-post-details',
+  standalone: true,
+  template: `
+    @if (postQuery.data(); as post) {
+      <h1>{{ post.title }}</h1>
+      <p>{{ post.content }}</p>
+    }
+  `,
+})
+export class PostDetailsComponent {
+  postId = signal<number | null>(null);
+
+  // Skip query if no ID is set
+  postQuery = useGetPostQuery(
+    () => this.postId() ?? skipToken,
+    {
+      pollingInterval: 5000, // Poll every 5 seconds
+      refetchOnFocus: true,
+    }
+  );
+}
+```
+
+## Integration with Store
+
+The created API must be provided to Angular's dependency injection system using either `provideStoreApi` (with NgRx Store) or `provideNoopStoreApi` (standalone):
+
+### With NgRx Store
+
+```typescript
+import { ApplicationConfig } from '@angular/core';
+import { provideStore } from '@ngrx/store';
+import { provideStoreApi } from 'ngrx-rtk-query';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideStore(),
+    provideStoreApi(postsApi),
+  ],
+};
+```
+
+### Without NgRx Store
+
+```typescript
+import { ApplicationConfig } from '@angular/core';
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideNoopStoreApi(postsApi),
+  ],
+};
+```
+
+## Implementation Details
+
+The `createApi` function:
+
+1. **Sets up dispatch mechanism**: Creates a dispatch function that handles both regular actions and thunks, with access to Angular's injector for dependency injection
+
+2. **Configures state selectors**: Provides `getState` and `useSelector` functions that integrate with the store
+
+3. **Builds the API**: Uses RTK Query's `buildCreateApi` with the core module and Angular hooks module
+
+4. **Generates hooks**: Automatically creates `useQuery`, `useLazyQuery`, `useMutation`, and `useInfiniteQuery` hooks for each endpoint
+
+5. **Initializes middleware**: Sets up the RTK Query middleware with the configured dispatch and getState functions
+
+## Source Reference
+
+Source: [`packages/ngrx-rtk-query/core/src/create-api.ts:19`](https://github.com/SaulMoro/ngrx-rtk-query/blob/main/packages/ngrx-rtk-query/core/src/create-api.ts#L19)
+
+## See Also
+
+- [fetchBaseQuery](/api/fetch-base-query) - Base query function for HTTP requests
+- [buildHooks](/api/build-hooks) - Hook generation system
+- [useQuery Hook](/api/hooks/use-query) - Query hook reference
+- [useMutation Hook](/api/hooks/use-mutation) - Mutation hook reference

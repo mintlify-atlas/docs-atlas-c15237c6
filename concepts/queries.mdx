@@ -1,0 +1,369 @@
+---
+title: Queries
+description: Learn how to use queries with ngrx-rtk-query to fetch and manage data with Angular Signals
+---
+
+## Overview
+
+Queries are the primary way to fetch and cache data in ngrx-rtk-query. They automatically manage loading states, errors, caching, and re-fetching, all through Angular Signals for fine-grained reactivity.
+
+## Defining a Query Endpoint
+
+Define queries using `build.query<ResultType, ArgType>()` in your API definition:
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+export interface Post {
+  id: number;
+  name: string;
+  fetched_at: string;
+}
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({
+      query: () => ({ url: '/posts' }),
+      providesTags: (result) =>
+        result
+          ? [...result.map(({ id }) => ({ type: 'Posts', id })), { type: 'Posts', id: 'LIST' }]
+          : [{ type: 'Posts', id: 'LIST' }],
+    }),
+    getPost: build.query<Post, number>({
+      query: (id) => `/posts/${id}`,
+      providesTags: (result, error, id) => [{ type: 'Posts', id }],
+    }),
+  }),
+});
+
+export const { useGetPostsQuery, useGetPostQuery } = postsApi;
+```
+
+## Basic Usage
+
+The `useXxxQuery()` hook returns a signal object with all query state:
+
+```typescript
+import { Component } from '@angular/core';
+import { useGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-posts-list',
+  standalone: true,
+  template: `
+    @if (postsQuery.isLoading()) {
+      <p>Loading...</p>
+    }
+    @if (postsQuery.isError()) {
+      <p>Error: {{ postsQuery.error() }}</p>
+    }
+    @if (postsQuery.data(); as posts) {
+      @for (post of posts; track post.id) {
+        <li>{{ post.name }}</li>
+      }
+    }
+  `,
+})
+export class PostsListComponent {
+  postsQuery = useGetPostsQuery();
+}
+```
+
+## Query State Properties
+
+The query signal provides the following properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `data()` | `T \| undefined` | The latest successfully fetched data |
+| `currentData()` | `T \| undefined` | The data for the current query args only |
+| `isLoading()` | `boolean` | `true` during initial fetch with no cached data |
+| `isFetching()` | `boolean` | `true` whenever a request is in flight |
+| `isSuccess()` | `boolean` | `true` when data is available |
+| `isError()` | `boolean` | `true` if the query resulted in an error |
+| `error()` | `SerializedError \| FetchBaseQueryError` | Error object if query failed |
+| `refetch()` | `() => Promise` | Function to manually refetch the query |
+
+## Fine-Grained Reactivity
+
+ngrx-rtk-query provides two ways to access query state:
+
+<Tabs>
+  <Tab title="Fine-Grained (Recommended)">
+    Access individual properties as signals for optimal change detection:
+
+    ```typescript
+    @Component({
+      template: `
+        <button [disabled]="postsQuery.isLoading()">Submit</button>
+      `
+    })
+    export class MyComponent {
+      postsQuery = useGetPostsQuery();
+      // Component only re-renders when isLoading changes
+    }
+    ```
+  </Tab>
+  <Tab title="Whole Object">
+    Access the entire query state object:
+
+    ```typescript
+    @Component({
+      template: `
+        <button [disabled]="postsQuery().isLoading">Submit</button>
+      `
+    })
+    export class MyComponent {
+      postsQuery = useGetPostsQuery();
+      // Component re-renders on any query state change
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+Use fine-grained access (`query.isLoading()`) for better performance. Your component will only re-render when that specific property changes.
+</Tip>
+
+## Queries with Parameters
+
+Queries can accept arguments in multiple forms:
+
+### Static Parameters
+
+```typescript
+export class PostDetailsComponent {
+  postQuery = useGetPostQuery(1); // Always fetches post with id=1
+}
+```
+
+### Signal Parameters
+
+Pass a signal to reactively refetch when the parameter changes:
+
+```typescript
+export class PostDetailsComponent {
+  readonly id = input.required<number>({ transform: numberAttribute });
+  
+  // Automatically refetches when id() changes
+  readonly postQuery = useGetPostQuery(this.id);
+}
+```
+
+### Function Parameters
+
+Use a function for computed parameters:
+
+```typescript
+export class PostDetailsComponent {
+  userId = signal(1);
+  filter = signal('active');
+  
+  // Refetches when userId() OR filter() changes
+  postsQuery = useGetPostsQuery(() => ({
+    userId: this.userId(),
+    filter: this.filter()
+  }));
+}
+```
+
+## Skip Token
+
+Use `skipToken` to conditionally skip a query:
+
+```typescript
+import { skipToken } from 'ngrx-rtk-query';
+
+export class CharacterCardComponent {
+  character = input<Character | undefined>(undefined);
+  
+  // Only fetches when character() is defined
+  locationQuery = useGetLocationQuery(
+    () => this.character()?.currentLocation ?? skipToken
+  );
+}
+```
+
+<Note>
+When a query receives `skipToken`, it will not make a request and the query state will show `isUninitialized: true`.
+</Note>
+
+## Query Options
+
+Customize query behavior with options:
+
+```typescript
+export class PostDetailsComponent {
+  readonly id = input.required<number>();
+  
+  readonly postQuery = useGetPostQuery(this.id, {
+    pollingInterval: 5000,           // Refetch every 5 seconds
+    refetchOnMountOrArgChange: true, // Refetch on mount or when id changes
+    refetchOnFocus: true,            // Refetch when window gains focus
+    refetchOnReconnect: true,        // Refetch when connection restored
+    skip: false,                     // Skip the query (alternative to skipToken)
+  });
+}
+```
+
+### Signal or Function Options
+
+Options can also be signals or functions:
+
+```typescript
+export class PostDetailsComponent {
+  readonly id = input.required<number>();
+  enablePolling = signal(false);
+  
+  readonly postQuery = useGetPostQuery(
+    this.id,
+    () => ({
+      pollingInterval: this.enablePolling() ? 5000 : 0,
+      skip: this.id() <= 0,
+    })
+  );
+}
+```
+
+## Selecting Partial State
+
+Use `selectFromResult` to transform or select specific fields:
+
+```typescript
+export class PostNameComponent {
+  readonly postQuery = useGetPostQuery(1, {
+    selectFromResult: ({ data, isLoading }) => ({
+      name: data?.name,
+      isLoading,
+    }),
+  });
+  
+  // postQuery.name() and postQuery.isLoading() are now available
+}
+```
+
+<Warning>
+`selectFromResult` creates a derived selector. Only the returned fields will trigger re-renders.
+</Warning>
+
+## Manual Refetching
+
+Trigger a refetch manually using the `refetch()` method:
+
+```typescript
+@Component({
+  template: `
+    <button 
+      [disabled]="postQuery.isFetching()" 
+      (click)="postQuery.refetch()">
+      {{ postQuery.isFetching() ? 'Refreshing...' : 'Refresh' }}
+    </button>
+  `
+})
+export class PostDetailsComponent {
+  readonly id = input.required<number>();
+  readonly postQuery = useGetPostQuery(this.id);
+}
+```
+
+## TypeScript Type Signatures
+
+### Query Hook Type
+
+```typescript
+type UseQuery<ResultType, ArgType> = (
+  arg: ArgType | Signal<ArgType> | (() => ArgType | typeof skipToken),
+  options?: UseQueryOptions<ResultType> | Signal<UseQueryOptions<ResultType>> | (() => UseQueryOptions<ResultType>)
+) => UseQueryStateDefaultResult<ResultType> & {
+  refetch: () => Promise<QueryActionCreatorResult<ResultType>>;
+};
+```
+
+### Query State Type
+
+```typescript
+interface UseQueryStateDefaultResult<T> {
+  // State
+  data: Signal<T | undefined>;
+  currentData: Signal<T | undefined>;
+  error: Signal<SerializedError | FetchBaseQueryError | undefined>;
+  requestId: Signal<string | undefined>;
+  endpointName: Signal<string | undefined>;
+  startedTimeStamp: Signal<number | undefined>;
+  fulfilledTimeStamp: Signal<number | undefined>;
+  
+  // Status booleans
+  isUninitialized: Signal<boolean>;
+  isLoading: Signal<boolean>;
+  isFetching: Signal<boolean>;
+  isSuccess: Signal<boolean>;
+  isError: Signal<boolean>;
+  
+  // Query metadata
+  originalArgs: Signal<unknown>;
+  status: Signal<QueryStatus>;
+}
+```
+
+## Best Practices
+
+<CodeGroup>
+```typescript Use Signal Inputs
+// ✅ Good - Automatically refetches when input changes
+export class PostDetailsComponent {
+  readonly id = input.required<number>();
+  readonly postQuery = useGetPostQuery(this.id);
+}
+```
+
+```typescript Use skipToken for Optional Fetching
+// ✅ Good - Only fetches when character is defined
+export class LocationComponent {
+  character = input<Character | undefined>();
+  locationQuery = useGetLocationQuery(
+    () => this.character()?.locationId ?? skipToken
+  );
+}
+```
+
+```typescript Fine-Grained Access
+// ✅ Good - Only re-renders when isLoading changes
+@Component({
+  template: `<button [disabled]="query.isLoading()">Load</button>`
+})
+export class MyComponent {
+  query = useGetPostsQuery();
+}
+```
+
+```typescript Avoid Manual Subscriptions
+// ❌ Bad - Don't manually subscribe to query state
+export class MyComponent {
+  query = useGetPostsQuery();
+  
+  ngOnInit() {
+    effect(() => {
+      const data = this.query.data();
+      // Process data...
+    });
+  }
+}
+
+// ✅ Good - Use computed for derived state
+export class MyComponent {
+  query = useGetPostsQuery();
+  processedData = computed(() => {
+    const data = this.query.data();
+    return data ? processData(data) : [];
+  });
+}
+```
+</CodeGroup>
+
+## Related Concepts
+
+- [Lazy Queries](/concepts/lazy-queries) - Load data on demand
+- [Mutations](/concepts/mutations) - Modify data on the server
+- [Cache Invalidation](/concepts/cache-invalidation) - Keep your cache fresh

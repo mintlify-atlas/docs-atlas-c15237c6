@@ -1,0 +1,538 @@
+---
+title: Code Splitting
+description: Lazy load APIs in feature modules for optimized bundle sizes
+---
+
+## Overview
+
+Code splitting allows you to lazy load API definitions in feature modules, reducing initial bundle size and improving application performance. ngrx-rtk-query supports multiple patterns for code splitting.
+
+## When to Use Code Splitting
+
+Code splitting is beneficial when:
+
+- You have multiple feature modules with different API endpoints
+- Your application has distinct user flows (e.g., admin, user, public)
+- You want to reduce initial bundle size
+- Features are used independently or conditionally
+
+<Note>
+  For APIs sharing the same base URL, prefer [RTK Query's code splitting](https://redux-toolkit.js.org/rtk-query/usage/code-splitting) with `injectEndpoints()` instead.
+</Note>
+
+## Basic Code Splitting
+
+Lazy load API definitions with Angular's route-based code splitting:
+
+<Steps>
+  <Step title="Create feature API">
+    ```typescript features/posts/api.ts
+    import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+    export interface Post {
+      id: number;
+      name: string;
+      content: string;
+    }
+
+    export const postsApi = createApi({
+      reducerPath: 'postsApi',
+      baseQuery: fetchBaseQuery({ baseUrl: 'https://posts.api.com' }),
+      tagTypes: ['Posts'],
+      endpoints: (build) => ({
+        getPosts: build.query<Post[], void>({
+          query: () => '/posts',
+          providesTags: ['Posts'],
+        }),
+        addPost: build.mutation<Post, Partial<Post>>({
+          query: (body) => ({
+            url: '/posts',
+            method: 'POST',
+            body,
+          }),
+          invalidatesTags: ['Posts'],
+        }),
+      }),
+    });
+
+    export const { useGetPostsQuery, useAddPostMutation } = postsApi;
+    ```
+  </Step>
+
+  <Step title="Provide API in lazy route">
+    ```typescript features/posts/routes.ts
+    import { Route } from '@angular/router';
+    import { provideStoreApi } from 'ngrx-rtk-query';
+    import { postsApi } from './api';
+
+    export const POSTS_ROUTES: Route[] = [
+      {
+        path: '',
+        providers: [provideStoreApi(postsApi)],
+        children: [
+          {
+            path: '',
+            loadComponent: () => import('./posts-list.component')
+              .then((c) => c.PostsListComponent),
+          },
+          {
+            path: ':id',
+            loadComponent: () => import('./post-details.component')
+              .then((c) => c.PostDetailsComponent),
+          },
+        ],
+      },
+    ];
+    ```
+  </Step>
+
+  <Step title="Lazy load in app routes">
+    ```typescript app.routes.ts
+    import { Route } from '@angular/router';
+
+    export const appRoutes: Route[] = [
+      {
+        path: 'posts',
+        loadChildren: () => import('./features/posts/routes')
+          .then((r) => r.POSTS_ROUTES),
+      },
+      {
+        path: 'users',
+        loadChildren: () => import('./features/users/routes')
+          .then((r) => r.USERS_ROUTES),
+      },
+    ];
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The API is only loaded when the user navigates to the `/posts` route.
+</Note>
+
+## Multiple APIs with Different Base URLs
+
+When you have multiple APIs with different base URLs, provide each API in its feature route:
+
+<Tabs>
+  <Tab title="Posts API">
+    ```typescript features/posts/api.ts
+    export const postsApi = createApi({
+      reducerPath: 'postsApi',
+      baseQuery: fetchBaseQuery({ 
+        baseUrl: 'https://posts-api.example.com' 
+      }),
+      endpoints: (build) => ({
+        getPosts: build.query<Post[], void>({
+          query: () => '/posts',
+        }),
+      }),
+    });
+    ```
+  </Tab>
+
+  <Tab title="Users API">
+    ```typescript features/users/api.ts
+    export const usersApi = createApi({
+      reducerPath: 'usersApi',
+      baseQuery: fetchBaseQuery({ 
+        baseUrl: 'https://users-api.example.com' 
+      }),
+      endpoints: (build) => ({
+        getUsers: build.query<User[], void>({
+          query: () => '/users',
+        }),
+      }),
+    });
+    ```
+  </Tab>
+
+  <Tab title="Routes">
+    ```typescript app.routes.ts
+    export const appRoutes: Route[] = [
+      {
+        path: 'posts',
+        providers: [provideStoreApi(postsApi)],
+        loadChildren: () => import('./features/posts/routes')
+          .then((r) => r.POSTS_ROUTES),
+      },
+      {
+        path: 'users',
+        providers: [provideStoreApi(usersApi)],
+        loadChildren: () => import('./features/users/routes')
+          .then((r) => r.USERS_ROUTES),
+      },
+    ];
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  Each API must have a unique `reducerPath` to avoid conflicts.
+</Warning>
+
+## Same Base URL with injectEndpoints
+
+For APIs sharing the same base URL, use RTK Query's `injectEndpoints()` pattern:
+
+<Steps>
+  <Step title="Create base API">
+    ```typescript core/api.ts
+    import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+    // Create base API with empty endpoints
+    export const baseApi = createApi({
+      reducerPath: 'api',
+      baseQuery: fetchBaseQuery({ baseUrl: 'https://api.example.com' }),
+      tagTypes: ['Posts', 'Users', 'Comments'],
+      endpoints: () => ({}),
+    });
+    ```
+  </Step>
+
+  <Step title="Inject endpoints in features">
+    ```typescript features/posts/api.ts
+    import { baseApi } from '@/core/api';
+
+    export const postsApi = baseApi.injectEndpoints({
+      endpoints: (build) => ({
+        getPosts: build.query<Post[], void>({
+          query: () => '/posts',
+          providesTags: ['Posts'],
+        }),
+        addPost: build.mutation<Post, Partial<Post>>({
+          query: (body) => ({
+            url: '/posts',
+            method: 'POST',
+            body,
+          }),
+          invalidatesTags: ['Posts'],
+        }),
+      }),
+    });
+
+    export const { useGetPostsQuery, useAddPostMutation } = postsApi;
+    ```
+  </Step>
+
+  <Step title="Provide base API once">
+    ```typescript app.config.ts
+    import { ApplicationConfig } from '@angular/core';
+    import { provideStoreApi } from 'ngrx-rtk-query';
+    import { baseApi } from './core/api';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideStore(),
+        provideStoreApi(baseApi), // Only provide base API
+      ],
+    };
+    ```
+  </Step>
+
+  <Step title="Use in lazy-loaded components">
+    ```typescript features/posts/posts-list.component.ts
+    import { Component } from '@angular/core';
+    import { useGetPostsQuery } from './api';
+
+    @Component({
+      template: `
+        @for (post of postsQuery.data(); track post.id) {
+          <div>{{ post.name }}</div>
+        }
+      `,
+    })
+    export class PostsListComponent {
+      // Hook is lazy-loaded with component
+      postsQuery = useGetPostsQuery();
+    }
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  With `injectEndpoints()`, the base API reducer is loaded upfront, but endpoint implementations are lazy-loaded per feature.
+</Note>
+
+## Eager vs Lazy Loading
+
+<Tabs>
+  <Tab title="Eager Loading">
+    Load API immediately at app startup:
+
+    ```typescript app.config.ts
+    import { provideStoreApi } from 'ngrx-rtk-query';
+    import { postsApi } from './posts/api';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideStore(),
+        provideStoreApi(postsApi), // Loaded immediately
+      ],
+    };
+    ```
+
+    **Use when:**
+    - API is used across the entire app
+    - Initial bundle size is not a concern
+    - API must be available before first render
+  </Tab>
+
+  <Tab title="Lazy Loading">
+    Load API only when needed:
+
+    ```typescript posts.routes.ts
+    import { provideStoreApi } from 'ngrx-rtk-query';
+    import { postsApi } from './api';
+
+    export const POSTS_ROUTES: Route[] = [
+      {
+        path: '',
+        providers: [provideStoreApi(postsApi)], // Lazy loaded
+        loadComponent: () => import('./posts-list.component')
+          .then((c) => c.PostsListComponent),
+      },
+    ];
+    ```
+
+    **Use when:**
+    - API is feature-specific
+    - Optimizing initial bundle size
+    - Feature may not be accessed by all users
+  </Tab>
+</Tabs>
+
+## Preloading Strategies
+
+Combine lazy loading with Angular's preloading strategies:
+
+```typescript app.config.ts
+import { ApplicationConfig } from '@angular/core';
+import { provideRouter, PreloadAllModules } from '@angular/router';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideRouter(
+      appRoutes,
+      // Preload all lazy routes after initial render
+      withPreloading(PreloadAllModules)
+    ),
+  ],
+};
+```
+
+### Custom Preload Strategy
+
+Create a selective preloading strategy:
+
+```typescript preload-strategy.ts
+import { Injectable } from '@angular/core';
+import { PreloadingStrategy, Route } from '@angular/router';
+import { Observable, of, timer } from 'rxjs';
+import { mergeMap } from 'rxjs/operators';
+
+@Injectable({ providedIn: 'root' })
+export class SelectivePreloadingStrategy implements PreloadingStrategy {
+  preload(route: Route, load: () => Observable<any>): Observable<any> {
+    if (route.data?.['preload']) {
+      // Delay preload by 2 seconds
+      return timer(2000).pipe(mergeMap(() => load()));
+    }
+    return of(null);
+  }
+}
+```
+
+```typescript app.routes.ts
+export const appRoutes: Route[] = [
+  {
+    path: 'posts',
+    data: { preload: true }, // Enable preloading
+    loadChildren: () => import('./features/posts/routes')
+      .then((r) => r.POSTS_ROUTES),
+  },
+];
+```
+
+## Shared APIs Across Features
+
+Share API instances across multiple features:
+
+<Steps>
+  <Step title="Create shared API">
+    ```typescript shared/api.ts
+    export const sharedApi = createApi({
+      reducerPath: 'sharedApi',
+      baseQuery: fetchBaseQuery({ baseUrl: 'https://api.example.com' }),
+      tagTypes: ['Shared'],
+      endpoints: (build) => ({
+        getConfig: build.query<Config, void>({
+          query: () => '/config',
+        }),
+      }),
+    });
+
+    export const { useGetConfigQuery } = sharedApi;
+    ```
+  </Step>
+
+  <Step title="Provide in root">
+    ```typescript app.config.ts
+    import { provideStoreApi } from 'ngrx-rtk-query';
+    import { sharedApi } from './shared/api';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideStore(),
+        provideStoreApi(sharedApi), // Available everywhere
+      ],
+    };
+    ```
+  </Step>
+
+  <Step title="Use in any feature">
+    ```typescript features/posts/posts-list.component.ts
+    import { useGetConfigQuery } from '@/shared/api';
+    import { useGetPostsQuery } from './api';
+
+    export class PostsListComponent {
+      configQuery = useGetConfigQuery(); // Shared API
+      postsQuery = useGetPostsQuery();   // Feature API
+    }
+    ```
+  </Step>
+</Steps>
+
+## Bundle Analysis
+
+Analyze your bundle to verify code splitting:
+
+```bash
+# Build with stats
+ng build --stats-json
+
+# Analyze with webpack-bundle-analyzer
+npx webpack-bundle-analyzer dist/stats.json
+```
+
+Look for:
+- API definitions in separate chunks
+- Reduced main bundle size
+- Lazy-loaded feature chunks
+
+## Performance Considerations
+
+<Tabs>
+  <Tab title="Benefits">
+    **Reduced Initial Bundle Size**
+    - Faster initial page load
+    - Improved Time to Interactive (TTI)
+    - Better Lighthouse scores
+
+    **On-Demand Loading**
+    - Load only what's needed
+    - Smaller cache footprint
+    - Faster subsequent navigations
+
+    **Better Caching**
+    - Unchanged features remain cached
+    - More granular cache invalidation
+  </Tab>
+
+  <Tab title="Trade-offs">
+    **Additional HTTP Requests**
+    - Lazy chunks require network requests
+    - Mitigated by HTTP/2 multiplexing
+    - Can use preloading strategies
+
+    **Complexity**
+    - More route configuration
+    - Need to manage multiple APIs
+    - Requires planning
+
+    **Route Transition Delay**
+    - First navigation to lazy route loads chunk
+    - Mitigated by preloading
+    - Use loading states
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<Steps>
+  <Step title="Use injectEndpoints for shared base URLs">
+    Don't create multiple APIs for the same backend:
+    ```typescript
+    // ✅ Good - single API, injected endpoints
+    const baseApi = createApi({ reducerPath: 'api', ... });
+    const postsApi = baseApi.injectEndpoints({ ... });
+
+    // ❌ Bad - multiple APIs, same base URL
+    const postsApi = createApi({ baseUrl: 'https://api.com', ... });
+    const usersApi = createApi({ baseUrl: 'https://api.com', ... });
+    ```
+  </Step>
+
+  <Step title="Provide APIs at the correct level">
+    - Root-level: Shared across entire app
+    - Feature route: Used only in that feature
+    - Component: Very rare, usually not recommended
+  </Step>
+
+  <Step title="Use unique reducerPath for each API">
+    ```typescript
+    const postsApi = createApi({ reducerPath: 'postsApi', ... });
+    const usersApi = createApi({ reducerPath: 'usersApi', ... });
+    ```
+  </Step>
+
+  <Step title="Consider preloading strategies">
+    Balance initial load time with user experience:
+    - Critical features: Eager load
+    - Common features: Preload
+    - Rare features: Lazy load
+  </Step>
+
+  <Step title="Monitor bundle sizes">
+    Regularly analyze bundles to ensure code splitting is effective.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### API not available in lazy route
+
+<Warning>
+  Ensure `provideStoreApi()` is in the route's `providers` array.
+</Warning>
+
+```typescript
+// ✅ Correct
+{
+  path: 'posts',
+  providers: [provideStoreApi(postsApi)],
+  loadChildren: () => import('./posts/routes'),
+}
+
+// ❌ Wrong - missing providers
+{
+  path: 'posts',
+  loadChildren: () => import('./posts/routes'),
+}
+```
+
+### Duplicate API registrations
+
+If you see errors about duplicate `reducerPath`:
+
+1. Check that each API has a unique `reducerPath`
+2. Ensure you're not providing the same API multiple times
+3. Use `injectEndpoints()` for shared base URLs
+
+### Slow initial route navigation
+
+If lazy routes load slowly:
+
+1. Use a preloading strategy
+2. Show loading indicators during route transitions
+3. Consider eager loading frequently-used features

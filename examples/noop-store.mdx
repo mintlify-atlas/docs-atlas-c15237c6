@@ -1,0 +1,313 @@
+---
+title: "Without NgRx Store (Noop Store)"
+description: "Use ngrx-rtk-query without NgRx Store dependencies for a lightweight setup"
+---
+
+This example shows how to use ngrx-rtk-query without NgRx Store, using the built-in noop store for a lightweight setup with zero NgRx dependencies.
+
+## App Configuration
+
+Use `provideNoopStoreApi()` instead of NgRx Store:
+
+```typescript app/app.config.ts
+import { type ApplicationConfig } from '@angular/core';
+import {
+  PreloadAllModules,
+  provideRouter,
+  withComponentInputBinding,
+  withEnabledBlockingInitialNavigation,
+  withPreloading,
+} from '@angular/router';
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+
+import { appRoutes } from './app.routes';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideNoopStoreApi(postsApi),
+
+    provideRouter(
+      appRoutes,
+      withPreloading(PreloadAllModules),
+      withComponentInputBinding(),
+      withEnabledBlockingInitialNavigation(),
+    ),
+  ],
+};
+```
+
+<Note>
+**No NgRx Store required**: The noop store provides the same query/mutation functionality without `@ngrx/store` dependencies. This reduces bundle size and simplifies setup.
+</Note>
+
+## Import Paths
+
+When using noop store, import from the separate entry points:
+
+<CodeGroup>
+
+```typescript With NgRx Store
+import { createApi, fetchBaseQuery, provideStoreApi } from 'ngrx-rtk-query';
+```
+
+```typescript Without NgRx Store
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query/core';
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+```
+
+</CodeGroup>
+
+<Tip>
+The `createApi` and `fetchBaseQuery` imports from `/core` are identical to the main package - only the provider changes.
+</Tip>
+
+## API Definition
+
+The API definition is exactly the same:
+
+```typescript app/posts/api.ts
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+import { type Post } from './post.model';
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({
+      query: () => ({ url: '/posts' }),
+      providesTags: (result) =>
+        result
+          ? [...result.map(({ id }) => ({ type: 'Posts', id }) as const), { type: 'Posts', id: 'LIST' }]
+          : [{ type: 'Posts', id: 'LIST' }],
+    }),
+    getPost: build.query<Post, number>({
+      query: (id) => `/posts/${id}`,
+      providesTags: (result, error, id) => [{ type: 'Posts', id }],
+    }),
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({
+        url: `/posts`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+    updatePost: build.mutation<Post, Partial<Post>>({
+      query: (data) => {
+        const { id, ...body } = data;
+        return {
+          url: `/posts/${id}`,
+          method: 'PUT',
+          body,
+        };
+      },
+      invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+    }),
+    deletePost: build.mutation<{ success: boolean; id: number }, number>({
+      query: (id) => ({
+        url: `/posts/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+  }),
+});
+
+export const { useGetPostQuery, useGetPostsQuery, useAddPostMutation, useDeletePostMutation, useUpdatePostMutation } =
+  postsApi;
+```
+
+## Component Usage
+
+Components use identical hooks:
+
+```typescript app/posts/posts-list.component.ts
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import { useAddPostMutation, useGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-posts-list',
+  standalone: true,
+  imports: [FormsModule, RouterLink],
+  template: `
+    <section class="mb-4">
+      <input
+        placeholder="New post name"
+        type="text"
+        [ngModel]="postNameControl()"
+        (ngModelChange)="postNameControl.set($event)"
+      />
+      <button
+        [disabled]="!postNameControl() || addPost.isLoading()"
+        (click)="addNewPost()"
+      >
+        {{ addPost.isLoading() ? 'Adding...' : 'Add Post' }}
+      </button>
+    </section>
+    <section>
+      <h1>Posts List</h1>
+      @if (postsQuery.isLoading()) {
+        <small>Loading...</small>
+      }
+      @if (postsQuery.data(); as posts) {
+        @for (post of posts; track post.id) {
+          <li>
+            <a [routerLink]="[post.id]">{{ post.name }}</a>
+          </li>
+        }
+      }
+    </section>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class PostsListComponent {
+  readonly postsQuery = useGetPostsQuery();
+  readonly addPost = useAddPostMutation();
+  readonly postNameControl = signal('');
+
+  addNewPost() {
+    this.addPost({ name: this.postNameControl() })
+      .unwrap()
+      .then(() => this.postNameControl.set(''));
+  }
+}
+```
+
+## Multiple APIs
+
+Register multiple APIs by calling `provideNoopStoreApi()` multiple times:
+
+```typescript app.config.ts
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+import { postsApi } from './posts/api';
+import { usersApi } from './users/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideNoopStoreApi(postsApi),
+    provideNoopStoreApi(usersApi),
+    // ...
+  ],
+};
+```
+
+## Lazy-Loaded APIs
+
+Register APIs in lazy route providers:
+
+```typescript app/admin/admin.routes.ts
+import { Route } from '@angular/router';
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+import { adminApi } from './admin-api';
+
+export const adminRoutes: Route[] = [
+  {
+    path: '',
+    providers: [provideNoopStoreApi(adminApi)],
+    children: [
+      // admin routes...
+    ],
+  },
+];
+```
+
+## Feature Comparison
+
+<CodeGroup>
+
+```typescript With NgRx Store
+// ✅ Redux DevTools support
+// ✅ State persistence plugins
+// ✅ NgRx effects integration
+// ✅ Custom selectors with other state
+// ❌ Larger bundle size
+// ❌ More dependencies
+
+import { provideStore } from '@ngrx/store';
+import { provideStoreDevtools } from '@ngrx/store-devtools';
+import { provideStoreApi } from 'ngrx-rtk-query';
+
+providers: [
+  provideStore(),
+  provideStoreDevtools(),
+  provideStoreApi(postsApi),
+]
+```
+
+```typescript Without NgRx Store
+// ✅ Smaller bundle size
+// ✅ Zero NgRx dependencies
+// ✅ Simpler setup
+// ✅ Full query/mutation features
+// ❌ No Redux DevTools
+// ❌ No NgRx effects integration
+
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+
+providers: [
+  provideNoopStoreApi(postsApi),
+]
+```
+
+</CodeGroup>
+
+## When to Use Noop Store
+
+Choose noop store when:
+
+- You don't need Redux DevTools
+- You want minimal bundle size
+- You're not using NgRx Store elsewhere
+- You prefer a simpler setup
+- You only need query/mutation features
+
+## Migration Between Stores
+
+Switching between NgRx Store and noop store is easy:
+
+<CodeGroup>
+
+```typescript From Noop to NgRx
+// Before
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+
+providers: [
+  provideNoopStoreApi(postsApi),
+]
+
+// After
+import { provideStore } from '@ngrx/store';
+import { provideStoreApi } from 'ngrx-rtk-query';
+
+providers: [
+  provideStore(),
+  provideStoreApi(postsApi),
+]
+```
+
+```typescript From NgRx to Noop
+// Before
+import { provideStore } from '@ngrx/store';
+import { provideStoreApi } from 'ngrx-rtk-query';
+
+providers: [
+  provideStore(),
+  provideStoreApi(postsApi),
+]
+
+// After
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+
+providers: [
+  provideNoopStoreApi(postsApi),
+]
+```
+
+</CodeGroup>
+
+<Note>
+No component code changes are required when switching between store implementations - only update the providers.
+</Note>

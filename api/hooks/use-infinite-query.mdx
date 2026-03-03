@@ -1,0 +1,278 @@
+---
+title: useInfiniteQuery
+description: Auto-generated hook for infinite scroll and load-more patterns
+---
+
+`useInfiniteQuery` is an auto-generated hook for managing paginated data with infinite scroll or "load more" functionality.
+
+## Overview
+
+For an endpoint defined with `build.infiniteQuery`, the generated hook will be `useGetXxxInfiniteQuery`.
+
+```typescript
+export const pokemonApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'https://example.com' }),
+  endpoints: (build) => ({
+    getPokemon: build.infiniteQuery<Pokemon[], string, number>({
+      infiniteQueryOptions: {
+        initialPageParam: 1,
+        getNextPageParam: (lastPage, allPages, lastPageParam) => 
+          lastPageParam + 1,
+        getPreviousPageParam: (firstPage, allPages, firstPageParam) =>
+          firstPageParam > 1 ? firstPageParam - 1 : undefined,
+      },
+      query: ({ queryArg, pageParam }) => `/type/${queryArg}?page=${pageParam}`,
+    }),
+  }),
+});
+
+export const { useGetPokemonInfiniteQuery } = pokemonApi;
+```
+
+## Signature
+
+```typescript
+const result = useXxxInfiniteQuery(arg, options?);
+```
+
+<ParamField path="arg" type="QueryArg | Signal<QueryArg> | (() => QueryArg)" required>
+  The query argument (like type name, search term, etc.)
+</ParamField>
+
+<ParamField path="options" type="UseInfiniteQueryOptions">
+  Optional configuration object
+
+  <Expandable title="Infinite query options">
+    <ParamField path="skip" type="boolean">
+      Skip this query execution if `true`
+    </ParamField>
+    
+    <ParamField path="refetchOnMountOrArgChange" type="boolean | number">
+      Refetch on mount or when arg changes
+    </ParamField>
+    
+    <ParamField path="selectFromResult" type="function">
+      Select a subset of the result
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Return Value
+
+<ResponseField name="data" type="Signal<InfiniteData<ResultType> | undefined>">
+  Object containing:
+  - `pages: ResultType[]` - Array of page results
+  - `pageParams: PageParam[]` - Array of page parameters used
+</ResponseField>
+
+<ResponseField name="isLoading" type="Signal<boolean>">
+  `true` if loading the first page
+</ResponseField>
+
+<ResponseField name="isFetching" type="Signal<boolean>">
+  `true` if fetching any page
+</ResponseField>
+
+<ResponseField name="isFetchingNextPage" type="Signal<boolean>">
+  `true` if fetching the next page
+</ResponseField>
+
+<ResponseField name="isFetchingPreviousPage" type="Signal<boolean>">
+  `true` if fetching the previous page
+</ResponseField>
+
+<ResponseField name="hasNextPage" type="Signal<boolean>">
+  `true` if there is a next page available
+</ResponseField>
+
+<ResponseField name="hasPreviousPage" type="Signal<boolean>">
+  `true` if there is a previous page available
+</ResponseField>
+
+<ResponseField name="fetchNextPage" type="() => void">
+  Function to fetch the next page
+</ResponseField>
+
+<ResponseField name="fetchPreviousPage" type="() => void">
+  Function to fetch the previous page
+</ResponseField>
+
+<ResponseField name="refetch" type="() => void">
+  Function to refetch all pages
+</ResponseField>
+
+## Usage Examples
+
+### Load More Button
+
+```typescript
+import { useGetPokemonInfiniteQuery } from './api';
+
+@Component({
+  selector: 'app-pokemon-list',
+  template: `
+    @if (pokemonQuery.isLoading()) {
+      <p>Loading...</p>
+    }
+    
+    @for (pokemon of allResults(); track pokemon.id) {
+      <div>{{ pokemon.name }}</div>
+    }
+    
+    @if (pokemonQuery.hasNextPage()) {
+      <button 
+        [disabled]="pokemonQuery.isFetchingNextPage()"
+        (click)="loadMore()">
+        {{ pokemonQuery.isFetchingNextPage() ? 'Loading...' : 'Load More' }}
+      </button>
+    }
+  `,
+})
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  
+  allResults = computed(() => 
+    this.pokemonQuery.data()?.pages.flat() ?? []
+  );
+  
+  loadMore() {
+    this.pokemonQuery.fetchNextPage();
+  }
+}
+```
+
+### Infinite Scroll with Intersection Observer
+
+```typescript
+import { viewChild, afterNextRender } from '@angular/core';
+
+@Component({
+  selector: 'app-pokemon-list',
+  template: `
+    @for (pokemon of allResults(); track pokemon.id) {
+      <div>{{ pokemon.name }}</div>
+    }
+    
+    <div #sentinel class="scroll-sentinel">
+      @if (pokemonQuery.isFetchingNextPage()) {
+        <p>Loading more...</p>
+      }
+    </div>
+  `,
+})
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  sentinel = viewChild<ElementRef>('sentinel');
+  
+  allResults = computed(() => 
+    this.pokemonQuery.data()?.pages.flat() ?? []
+  );
+  
+  constructor() {
+    afterNextRender(() => {
+      const observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && this.pokemonQuery.hasNextPage()) {
+          this.pokemonQuery.fetchNextPage();
+        }
+      });
+      
+      if (this.sentinel()?.nativeElement) {
+        observer.observe(this.sentinel()!.nativeElement);
+      }
+    });
+  }
+}
+```
+
+### Bidirectional Scrolling
+
+```typescript
+@Component({
+  template: `
+    @if (pokemonQuery.hasPreviousPage()) {
+      <button (click)="pokemonQuery.fetchPreviousPage()">
+        Load Previous
+      </button>
+    }
+    
+    @for (pokemon of allResults(); track pokemon.id) {
+      <div>{{ pokemon.name }}</div>
+    }
+    
+    @if (pokemonQuery.hasNextPage()) {
+      <button (click)="pokemonQuery.fetchNextPage()">
+        Load Next
+      </button>
+    }
+  `,
+})
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  
+  allResults = computed(() => 
+    this.pokemonQuery.data()?.pages.flat() ?? []
+  );
+}
+```
+
+### Accessing Page Parameters
+
+```typescript
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  
+  pageInfo = computed(() => {
+    const data = this.pokemonQuery.data();
+    if (!data) return null;
+    
+    return {
+      totalPages: data.pages.length,
+      pageParams: data.pageParams,
+      lastPage: data.pageParams[data.pageParams.length - 1],
+    };
+  });
+}
+```
+
+## Data Structure
+
+```typescript
+{
+  pages: [
+    [{ id: 1, name: 'Charmander' }, ...], // Page 1
+    [{ id: 11, name: 'Charmeleon' }, ...], // Page 2
+    [{ id: 21, name: 'Charizard' }, ...],  // Page 3
+  ],
+  pageParams: [1, 2, 3]
+}
+```
+
+<Tip>
+Use `computed()` to flatten the pages array for easier template usage:
+```typescript
+allResults = computed(() => this.query.data()?.pages.flat() ?? []);
+```
+</Tip>
+
+## Refetching All Pages
+
+```typescript
+export class PokemonListComponent {
+  pokemonQuery = useGetPokemonInfiniteQuery('fire');
+  
+  refreshAll() {
+    // Refetches all loaded pages
+    this.pokemonQuery.refetch();
+  }
+}
+```
+
+<Warning>
+`refetch()` will re-fetch ALL loaded pages, not just the first page. For large lists, this can be expensive.
+</Warning>
+
+## See Also
+
+- [Infinite Queries Concept](/concepts/infinite-queries) - Core concepts
+- [Infinite Scroll Example](/examples/infinite-scroll) - Complete example
+- [Pagination Example](/examples/pagination) - Alternative patterns

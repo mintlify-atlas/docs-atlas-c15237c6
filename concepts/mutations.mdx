@@ -1,0 +1,513 @@
+---
+title: Mutations
+description: Learn how to modify server data with mutations in ngrx-rtk-query
+---
+
+## Overview
+
+Mutations are used to create, update, or delete data on the server. Unlike queries, mutations:
+
+- Are triggered manually (not automatically on mount)
+- Do not cache results by default
+- Can invalidate query cache to trigger refetches
+- Return promises for handling success/error states
+
+## Defining a Mutation Endpoint
+
+Define mutations using `build.mutation<ResultType, ArgType>()` in your API definition:
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+export interface Post {
+  id: number;
+  name: string;
+}
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({
+        url: '/posts',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+    updatePost: build.mutation<Post, Partial<Post>>({
+      query: (data) => {
+        const { id, ...body } = data;
+        return {
+          url: `/posts/${id}`,
+          method: 'PUT',
+          body,
+        };
+      },
+      invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+    }),
+    deletePost: build.mutation<{ success: boolean; id: number }, number>({
+      query: (id) => ({
+        url: `/posts/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+  }),
+});
+
+export const {
+  useAddPostMutation,
+  useUpdatePostMutation,
+  useDeletePostMutation,
+} = postsApi;
+```
+
+## Basic Usage
+
+The mutation hook returns a trigger function with state signals attached:
+
+```typescript
+import { Component, signal } from '@angular/core';
+import { useAddPostMutation } from './api';
+
+@Component({
+  selector: 'app-add-post',
+  standalone: true,
+  template: `
+    <input 
+      type="text" 
+      [value]="postName()" 
+      (input)="postName.set($any($event.target).value)" />
+    
+    <button 
+      [disabled]="!postName() || addPost.isLoading()"
+      (click)="addNewPost()">
+      {{ addPost.isLoading() ? 'Adding...' : 'Add Post' }}
+    </button>
+    
+    @if (addPost.isError()) {
+      <p class="error">Error: {{ addPost.error() }}</p>
+    }
+  `,
+})
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+  postName = signal('');
+  
+  addNewPost() {
+    this.addPost({ name: this.postName() });
+  }
+}
+```
+
+## Mutation Structure
+
+The mutation hook returns a trigger function with signal properties:
+
+```typescript
+const trigger = useAddPostMutation();
+
+// Trigger function - call to execute the mutation
+trigger({ name: 'New Post' });
+
+// Signal properties - access mutation state
+trigger.data();         // Mutation result data
+trigger.isLoading();    // True while mutation is in progress
+trigger.isSuccess();    // True if mutation succeeded
+trigger.isError();      // True if mutation failed
+trigger.error();        // Error object if mutation failed
+
+// Utility methods
+trigger.reset();        // Reset mutation state
+trigger.originalArgs(); // The last arguments passed to trigger
+```
+
+<Tip>
+Mutation hooks return the trigger function itself, with signals attached as properties (similar to lazy queries).
+</Tip>
+
+## Mutation State Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `data()` | `T \| undefined` | The result data from the mutation |
+| `isLoading()` | `boolean` | `true` while the mutation is in progress |
+| `isSuccess()` | `boolean` | `true` if the mutation succeeded |
+| `isError()` | `boolean` | `true` if the mutation failed |
+| `isUninitialized()` | `boolean` | `true` if the mutation hasn't been triggered yet |
+| `error()` | `SerializedError \| FetchBaseQueryError` | Error object if mutation failed |
+| `originalArgs()` | `ArgType \| undefined` | The arguments passed to the mutation |
+| `reset()` | `() => void` | Reset the mutation state |
+
+## Unwrapping Promises
+
+Use `.unwrap()` to handle the mutation result as a promise:
+
+```typescript
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+  postName = signal('');
+  
+  addNewPost() {
+    this.addPost({ name: this.postName() })
+      .unwrap()
+      .then((newPost) => {
+        console.log('Post created:', newPost);
+        this.postName.set(''); // Clear form
+      })
+      .catch((error) => {
+        console.error('Failed to create post:', error);
+      });
+  }
+}
+```
+
+### Async/Await Pattern
+
+```typescript
+async addNewPost() {
+  try {
+    const newPost = await this.addPost({ name: this.postName() }).unwrap();
+    console.log('Post created:', newPost);
+    this.postName.set('');
+  } catch (error) {
+    console.error('Failed to create post:', error);
+  }
+}
+```
+
+<Warning>
+Without `.unwrap()`, the promise will never reject. Always use `.unwrap()` to properly handle errors.
+</Warning>
+
+## Resetting Mutation State
+
+Use the `reset()` method to clear mutation state:
+
+```typescript
+@Component({
+  template: `
+    <button (click)="addPost({ name: 'New' })">Add</button>
+    <button (click)="addPost.reset()">Clear State</button>
+    
+    @if (addPost.isSuccess()) {
+      <p>Post added successfully!</p>
+    }
+  `
+})
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+}
+```
+
+<Note>
+Resetting clears the mutation state (data, error, isSuccess, etc.) but doesn't affect the cache.
+</Note>
+
+## Common Use Cases
+
+### Creating Data
+
+```typescript
+@Component({
+  template: `
+    <form (submit)="onSubmit()">
+      <input 
+        type="text" 
+        [(ngModel)]="name" 
+        name="name" 
+        required />
+      <button 
+        type="submit" 
+        [disabled]="addPost.isLoading()">
+        {{ addPost.isLoading() ? 'Adding...' : 'Add Post' }}
+      </button>
+    </form>
+    
+    @if (addPost.isSuccess()) {
+      <p class="success">Post created successfully!</p>
+    }
+  `
+})
+export class CreatePostComponent {
+  addPost = useAddPostMutation();
+  name = '';
+  
+  onSubmit() {
+    this.addPost({ name: this.name })
+      .unwrap()
+      .then(() => {
+        this.name = '';
+        this.addPost.reset(); // Clear success message after delay
+      });
+  }
+}
+```
+
+### Updating Data
+
+```typescript
+@Component({
+  template: `
+    <div class="post-editor">
+      <input 
+        type="text" 
+        [ngModel]="postName()" 
+        (ngModelChange)="postName.set($event)" />
+      
+      <button 
+        [disabled]="updatePost.isLoading()"
+        (click)="savePost()">
+        {{ updatePost.isLoading() ? 'Saving...' : 'Save' }}
+      </button>
+    </div>
+  `
+})
+export class EditPostComponent {
+  id = input.required<number>();
+  postName = signal('');
+  
+  updatePost = useUpdatePostMutation();
+  
+  savePost() {
+    this.updatePost({ id: this.id(), name: this.postName() })
+      .unwrap()
+      .then(() => console.log('Post updated'));
+  }
+}
+```
+
+### Deleting Data
+
+```typescript
+import { Component, inject } from '@angular/core';
+import { Router } from '@angular/router';
+import { useDeletePostMutation } from './api';
+
+@Component({
+  template: `
+    <button 
+      class="delete-btn"
+      [disabled]="deletePost.isLoading()"
+      (click)="onDelete()">
+      {{ deletePost.isLoading() ? 'Deleting...' : 'Delete' }}
+    </button>
+  `
+})
+export class PostDetailsComponent {
+  id = input.required<number>();
+  
+  deletePost = useDeletePostMutation();
+  #router = inject(Router);
+  
+  onDelete() {
+    if (confirm('Are you sure?')) {
+      this.deletePost(this.id())
+        .unwrap()
+        .then(() => this.#router.navigate(['/']))
+        .catch((error) => console.error('Error deleting post:', error));
+    }
+  }
+}
+```
+
+## Fixed Cache Key
+
+Use `fixedCacheKey` to share mutation state across multiple components:
+
+```typescript
+export class Component1 {
+  // Both components share the same mutation state
+  addPost = useAddPostMutation({ fixedCacheKey: 'shared-add-post' });
+}
+
+export class Component2 {
+  // Same fixedCacheKey = same state
+  addPost = useAddPostMutation({ fixedCacheKey: 'shared-add-post' });
+}
+```
+
+<Tip>
+`fixedCacheKey` is useful for global loading indicators or shared form state across multiple views.
+</Tip>
+
+## Mutation Options
+
+Customize mutation behavior with options:
+
+```typescript
+export class AddPostComponent {
+  addPost = useAddPostMutation({
+    // Share mutation state across components
+    fixedCacheKey: 'add-post-mutation',
+    
+    // Select specific fields from mutation state
+    selectFromResult: ({ data, isLoading }) => ({ data, isLoading }),
+  });
+}
+```
+
+### selectFromResult
+
+Transform the mutation state:
+
+```typescript
+addPost = useAddPostMutation({
+  selectFromResult: ({ data, isLoading, isError }) => ({
+    post: data,
+    loading: isLoading,
+    error: isError,
+  }),
+});
+
+// Access transformed state
+addPost.post();
+addPost.loading();
+addPost.error();
+```
+
+## Pessimistic vs Optimistic Updates
+
+### Pessimistic Updates (Default)
+
+Wait for server response before updating UI:
+
+```typescript
+deletePost(id: number) {
+  this.deletePost(id)
+    .unwrap()
+    .then(() => {
+      // Update UI after server confirms deletion
+      this.router.navigate(['/']);
+    });
+}
+```
+
+### Optimistic Updates
+
+Update UI immediately, rollback on error (see [Cache Invalidation](/concepts/cache-invalidation) for details):
+
+```typescript
+deletePost: build.mutation<void, number>({
+  query: (id) => ({ url: `/posts/${id}`, method: 'DELETE' }),
+  
+  async onQueryStarted(id, { dispatch, queryFulfilled }) {
+    // Optimistically remove from cache
+    const patchResult = dispatch(
+      postsApi.util.updateQueryData('getPosts', undefined, (draft) => {
+        return draft.filter(post => post.id !== id);
+      })
+    );
+    
+    try {
+      await queryFulfilled;
+    } catch {
+      // Rollback on error
+      patchResult.undo();
+    }
+  },
+}),
+```
+
+## TypeScript Type Signatures
+
+### Mutation Hook Type
+
+```typescript
+type UseMutation<ResultType, ArgType> = (
+  options?: UseMutationOptions<ResultType>
+) => MutationTrigger<ResultType, ArgType>;
+
+type MutationTrigger<ResultType, ArgType> = {
+  // Trigger function
+  (arg: ArgType): MutationActionCreatorResult<ResultType>;
+  
+  // Signal properties
+  data: Signal<ResultType | undefined>;
+  error: Signal<SerializedError | FetchBaseQueryError | undefined>;
+  isUninitialized: Signal<boolean>;
+  isLoading: Signal<boolean>;
+  isSuccess: Signal<boolean>;
+  isError: Signal<boolean>;
+  
+  // Utility properties
+  originalArgs: Signal<ArgType | undefined>;
+  reset: () => void;
+};
+```
+
+### Mutation Action Creator Result
+
+```typescript
+interface MutationActionCreatorResult<T> {
+  unwrap: () => Promise<T>;
+  reset: () => void;
+  arg: {
+    originalArgs: unknown;
+    fixedCacheKey?: string;
+  };
+  requestId: string;
+}
+```
+
+## Best Practices
+
+<CodeGroup>
+```typescript Always Use unwrap for Error Handling
+// ✅ Good - Properly handle errors
+addPost(data: Post) {
+  this.addPost(data)
+    .unwrap()
+    .then(() => this.handleSuccess())
+    .catch((error) => this.handleError(error));
+}
+
+// ❌ Bad - Errors won't be caught
+addPost(data: Post) {
+  this.addPost(data).then(() => this.handleSuccess());
+}
+```
+
+```typescript Clear Form After Success
+// ✅ Good - Reset form on success
+addNewPost() {
+  this.addPost({ name: this.postName() })
+    .unwrap()
+    .then(() => {
+      this.postName.set('');  // Clear form
+      this.addPost.reset();   // Reset mutation state
+    });
+}
+```
+
+```typescript Use isLoading for Button State
+// ✅ Good - Disable button during mutation
+@Component({
+  template: `
+    <button 
+      [disabled]="addPost.isLoading()" 
+      (click)="submit()">
+      {{ addPost.isLoading() ? 'Saving...' : 'Save' }}
+    </button>
+  `
+})
+```
+
+```typescript Navigate After Delete
+// ✅ Good - Navigate after successful deletion
+deletePost() {
+  this.deletePost(this.id())
+    .unwrap()
+    .then(() => this.router.navigate(['/']))
+    .catch((error) => console.error('Delete failed:', error));
+}
+```
+</CodeGroup>
+
+## Related Concepts
+
+- [Queries](/concepts/queries) - Fetch and cache data
+- [Cache Invalidation](/concepts/cache-invalidation) - Automatically refetch after mutations
+- [Error Handling](/guides/error-handling) - Error handling and recovery patterns

@@ -1,0 +1,627 @@
+---
+title: Error Handling
+description: Handle errors with unwrap(), try/catch patterns, and error states in ngrx-rtk-query
+---
+
+## Overview
+
+ngrx-rtk-query provides multiple patterns for handling errors from queries and mutations. Choose the right approach based on your use case: UI error display, programmatic error handling, or global error management.
+
+## Error States in Queries
+
+Queries provide signal-based error state that you can display in your template:
+
+```typescript
+import { Component } from '@angular/core';
+import { useGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-posts-list',
+  template: `
+    @if (postsQuery.isLoading()) {
+      <p>Loading posts...</p>
+    }
+    @if (postsQuery.isError()) {
+      <div class="error">
+        <p>Error loading posts</p>
+        <p>{{ postsQuery.error() | json }}</p>
+        <button (click)="postsQuery.refetch()">Retry</button>
+      </div>
+    }
+    @if (postsQuery.data(); as posts) {
+      @for (post of posts; track post.id) {
+        <div>{{ post.name }}</div>
+      }
+    }
+  `,
+})
+export class PostsListComponent {
+  postsQuery = useGetPostsQuery();
+}
+```
+
+### Query Error Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `isError()` | `boolean` | True when the query has failed |
+| `error()` | `SerializedError \| FetchBaseQueryError` | Error object with details |
+| `isLoading()` | `boolean` | True on initial load |
+| `isFetching()` | `boolean` | True during any fetch (including refetch) |
+| `refetch()` | `() => void` | Manually retry the query |
+
+## Mutation Error Handling
+
+Mutations provide error state signals and support `unwrap()` for promise-based error handling:
+
+### Template Error Display
+
+```typescript
+import { Component, signal } from '@angular/core';
+import { useAddPostMutation } from './api';
+
+@Component({
+  selector: 'app-add-post',
+  template: `
+    <input 
+      [ngModel]="postName()" 
+      (ngModelChange)="postName.set($event)"
+      placeholder="Post name"
+    />
+    <button 
+      [disabled]="addPost.isLoading()"
+      (click)="addNewPost()"
+    >
+      {{ addPost.isLoading() ? 'Adding...' : 'Add Post' }}
+    </button>
+
+    @if (addPost.isError()) {
+      <div class="error">
+        <p>Failed to add post</p>
+        <p>{{ addPost.error() | json }}</p>
+      </div>
+    }
+    @if (addPost.isSuccess()) {
+      <div class="success">Post added successfully!</div>
+    }
+  `,
+})
+export class AddPostComponent {
+  postName = signal('');
+  addPost = useAddPostMutation();
+
+  addNewPost() {
+    this.addPost({ name: this.postName() });
+  }
+}
+```
+
+### Mutation Error Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `isLoading()` | `boolean` | True while mutation is in progress |
+| `isError()` | `boolean` | True when mutation failed |
+| `isSuccess()` | `boolean` | True when mutation succeeded |
+| `error()` | `SerializedError \| FetchBaseQueryError` | Error object |
+| `data()` | `T \| undefined` | Response data on success |
+| `reset()` | `() => void` | Reset mutation state |
+
+## Using unwrap() for Error Handling
+
+The `unwrap()` method converts the mutation result into a Promise that rejects on error:
+
+<Tabs>
+  <Tab title="Then/Catch">
+    ```typescript
+    import { Component, signal } from '@angular/core';
+    import { useAddPostMutation } from './api';
+
+    @Component({
+      template: `
+        <input [(ngModel)]="postName" />
+        <button (click)="addNewPost()">Add Post</button>
+        @if (errorMessage()) {
+          <div class="error">{{ errorMessage() }}</div>
+        }
+        @if (successMessage()) {
+          <div class="success">{{ successMessage() }}</div>
+        }
+      `,
+    })
+    export class AddPostComponent {
+      postName = signal('');
+      errorMessage = signal('');
+      successMessage = signal('');
+      addPost = useAddPostMutation();
+
+      addNewPost() {
+        this.addPost({ name: this.postName() })
+          .unwrap()
+          .then((data) => {
+            this.successMessage.set(`Post "${data.name}" created!`);
+            this.postName.set('');
+            this.errorMessage.set('');
+          })
+          .catch((error) => {
+            this.errorMessage.set(
+              error.data?.message || 'Failed to create post'
+            );
+            this.successMessage.set('');
+          });
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Async/Await">
+    ```typescript
+    import { Component, signal } from '@angular/core';
+    import { useAddPostMutation } from './api';
+
+    @Component({
+      template: `
+        <input [(ngModel)]="postName" />
+        <button (click)="addNewPost()">Add Post</button>
+        @if (errorMessage()) {
+          <div class="error">{{ errorMessage() }}</div>
+        }
+        @if (successMessage()) {
+          <div class="success">{{ successMessage() }}</div>
+        }
+      `,
+    })
+    export class AddPostComponent {
+      postName = signal('');
+      errorMessage = signal('');
+      successMessage = signal('');
+      addPost = useAddPostMutation();
+
+      async addNewPost() {
+        try {
+          const data = await this.addPost({ 
+            name: this.postName() 
+          }).unwrap();
+          
+          this.successMessage.set(`Post "${data.name}" created!`);
+          this.postName.set('');
+          this.errorMessage.set('');
+        } catch (error: any) {
+          this.errorMessage.set(
+            error.data?.message || 'Failed to create post'
+          );
+          this.successMessage.set('');
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  `unwrap()` only works with mutations, not queries. For queries, use the `error()` signal directly.
+</Note>
+
+## Error Response Types
+
+ngrx-rtk-query provides typed error responses:
+
+### FetchBaseQueryError
+
+```typescript
+interface FetchBaseQueryError {
+  status: number | 'FETCH_ERROR' | 'PARSING_ERROR' | 'TIMEOUT_ERROR' | 'CUSTOM_ERROR';
+  data?: any;
+  error?: string;
+}
+```
+
+### SerializedError
+
+```typescript
+interface SerializedError {
+  name?: string;
+  message?: string;
+  code?: string;
+  stack?: string;
+}
+```
+
+## Type-Safe Error Handling
+
+Create type guards for error handling:
+
+```typescript error-utils.ts
+import { type SerializedError } from '@reduxjs/toolkit';
+import { type FetchBaseQueryError } from 'ngrx-rtk-query';
+
+export function isFetchBaseQueryError(
+  error: any
+): error is FetchBaseQueryError {
+  return typeof error === 'object' && error != null && 'status' in error;
+}
+
+export function isSerializedError(
+  error: any
+): error is SerializedError {
+  return (
+    typeof error === 'object' &&
+    error != null &&
+    'message' in error &&
+    !('status' in error)
+  );
+}
+
+export function getErrorMessage(error: unknown): string {
+  if (isFetchBaseQueryError(error)) {
+    return error.data?.message || error.error || 'An error occurred';
+  }
+  if (isSerializedError(error)) {
+    return error.message || 'An error occurred';
+  }
+  return 'An unknown error occurred';
+}
+```
+
+Use in components:
+
+```typescript
+import { getErrorMessage } from './error-utils';
+
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+  errorMessage = signal('');
+
+  async addNewPost() {
+    try {
+      await this.addPost({ name: 'New Post' }).unwrap();
+    } catch (error) {
+      this.errorMessage.set(getErrorMessage(error));
+    }
+  }
+}
+```
+
+## Advanced Error Patterns
+
+### Retry on Error
+
+Implement automatic retry logic:
+
+```typescript
+import { Component } from '@angular/core';
+import { useAddPostMutation } from './api';
+
+@Component({ /* ... */ })
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+
+  async addNewPostWithRetry(
+    data: Partial<Post>, 
+    maxRetries = 3
+  ) {
+    let lastError: any;
+    
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await this.addPost(data).unwrap();
+      } catch (error) {
+        lastError = error;
+        console.warn(`Attempt ${i + 1} failed, retrying...`);
+        // Wait before retrying (exponential backoff)
+        await new Promise(resolve => 
+          setTimeout(resolve, Math.pow(2, i) * 1000)
+        );
+      }
+    }
+    
+    throw lastError;
+  }
+}
+```
+
+### Error Notification Service
+
+Create a centralized error notification service:
+
+<Steps>
+  <Step title="Create notification service">
+    ```typescript notification.service.ts
+    import { Injectable, signal } from '@angular/core';
+
+    export interface Notification {
+      id: string;
+      type: 'error' | 'success' | 'info';
+      message: string;
+    }
+
+    @Injectable({ providedIn: 'root' })
+    export class NotificationService {
+      notifications = signal<Notification[]>([]);
+
+      showError(message: string) {
+        this.add({ type: 'error', message });
+      }
+
+      showSuccess(message: string) {
+        this.add({ type: 'success', message });
+      }
+
+      private add(notification: Omit<Notification, 'id'>) {
+        const id = crypto.randomUUID();
+        this.notifications.update(list => [
+          ...list, 
+          { ...notification, id }
+        ]);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => this.remove(id), 5000);
+      }
+
+      remove(id: string) {
+        this.notifications.update(list => 
+          list.filter(n => n.id !== id)
+        );
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Use in components">
+    ```typescript add-post.component.ts
+    import { Component, inject } from '@angular/core';
+    import { useAddPostMutation } from './api';
+    import { NotificationService } from './notification.service';
+    import { getErrorMessage } from './error-utils';
+
+    @Component({ /* ... */ })
+    export class AddPostComponent {
+      addPost = useAddPostMutation();
+      notifications = inject(NotificationService);
+
+      async addNewPost(data: Partial<Post>) {
+        try {
+          const result = await this.addPost(data).unwrap();
+          this.notifications.showSuccess(
+            `Post "${result.name}" created!`
+          );
+        } catch (error) {
+          this.notifications.showError(getErrorMessage(error));
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Display notifications">
+    ```typescript app.component.ts
+    import { Component, inject } from '@angular/core';
+    import { NotificationService } from './notification.service';
+
+    @Component({
+      selector: 'app-root',
+      template: `
+        <div class="notifications">
+          @for (notification of notifications.notifications(); track notification.id) {
+            <div class="notification" [class]="notification.type">
+              {{ notification.message }}
+              <button (click)="notifications.remove(notification.id)">×</button>
+            </div>
+          }
+        </div>
+        <router-outlet />
+      `,
+    })
+    export class AppComponent {
+      notifications = inject(NotificationService);
+    }
+    ```
+  </Step>
+</Steps>
+
+### Router Navigation on Error
+
+Navigate to an error page on critical failures:
+
+```typescript
+import { Component, inject } from '@angular/core';
+import { Router } from '@angular/router';
+import { useDeletePostMutation } from './api';
+import { getErrorMessage } from './error-utils';
+
+@Component({ /* ... */ })
+export class PostDetailsComponent {
+  #router = inject(Router);
+  deletePost = useDeletePostMutation();
+
+  async deleteCurrentPost(id: number) {
+    try {
+      await this.deletePost(id).unwrap();
+      this.#router.navigate(['/posts']);
+    } catch (error) {
+      const message = getErrorMessage(error);
+      // Navigate to error page with message
+      this.#router.navigate(['/error'], {
+        queryParams: { message },
+      });
+    }
+  }
+}
+```
+
+### Conditional Error Display
+
+Show different UI based on error type:
+
+```typescript
+import { Component, computed } from '@angular/core';
+import { useGetPostsQuery } from './api';
+import { isFetchBaseQueryError } from './error-utils';
+
+@Component({
+  template: `
+    @if (postsQuery.isError()) {
+      @if (isNetworkError()) {
+        <div class="error">
+          <p>Network error. Check your connection.</p>
+          <button (click)="postsQuery.refetch()">Retry</button>
+        </div>
+      } @else if (isNotFound()) {
+        <div class="info">
+          <p>No posts found.</p>
+        </div>
+      } @else if (isServerError()) {
+        <div class="error">
+          <p>Server error. Please try again later.</p>
+        </div>
+      } @else {
+        <div class="error">
+          <p>An unknown error occurred.</p>
+        </div>
+      }
+    }
+  `,
+})
+export class PostsListComponent {
+  postsQuery = useGetPostsQuery();
+
+  isNetworkError = computed(() => {
+    const error = this.postsQuery.error();
+    return (
+      isFetchBaseQueryError(error) && 
+      error.status === 'FETCH_ERROR'
+    );
+  });
+
+  isNotFound = computed(() => {
+    const error = this.postsQuery.error();
+    return isFetchBaseQueryError(error) && error.status === 404;
+  });
+
+  isServerError = computed(() => {
+    const error = this.postsQuery.error();
+    return (
+      isFetchBaseQueryError(error) && 
+      typeof error.status === 'number' &&
+      error.status >= 500
+    );
+  });
+}
+```
+
+## Reset Error State
+
+Reset mutation error state manually:
+
+```typescript
+import { Component } from '@angular/core';
+import { useAddPostMutation } from './api';
+
+@Component({
+  template: `
+    @if (addPost.isError()) {
+      <div class="error">
+        <p>{{ addPost.error() | json }}</p>
+        <button (click)="addPost.reset()">Dismiss</button>
+      </div>
+    }
+    <button (click)="addNewPost()">Add Post</button>
+  `,
+})
+export class AddPostComponent {
+  addPost = useAddPostMutation();
+
+  addNewPost() {
+    this.addPost({ name: 'New Post' });
+  }
+}
+```
+
+<Note>
+  Calling `reset()` clears `isError`, `isSuccess`, `error`, and `data` states.
+</Note>
+
+## Best Practices
+
+<Steps>
+  <Step title="Use unwrap() for programmatic handling">
+    Use `unwrap()` when you need to perform actions based on success/failure:
+    ```typescript
+    try {
+      const data = await mutation(args).unwrap();
+      // Navigate, show notification, etc.
+    } catch (error) {
+      // Handle error programmatically
+    }
+    ```
+  </Step>
+
+  <Step title="Use signals for UI error display">
+    Use `isError()` and `error()` signals for template rendering:
+    ```typescript
+    @if (query.isError()) {
+      <div>{{ query.error() | json }}</div>
+    }
+    ```
+  </Step>
+
+  <Step title="Create error utilities">
+    Centralize error handling logic in utility functions for reusability.
+  </Step>
+
+  <Step title="Provide user-friendly error messages">
+    Transform technical errors into user-friendly messages:
+    ```typescript
+    const message = error.data?.message || 'Something went wrong';
+    ```
+  </Step>
+
+  <Step title="Always provide retry options">
+    Let users retry failed operations:
+    ```typescript
+    <button (click)="query.refetch()">Retry</button>
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### unwrap() not rejecting
+
+<Warning>
+  `unwrap()` only works with mutations. Queries don't support `unwrap()`.
+</Warning>
+
+```typescript
+// ❌ Wrong - queries don't have unwrap()
+const query = useGetPostsQuery();
+query.unwrap(); // Error!
+
+// ✅ Correct - use error signal
+const query = useGetPostsQuery();
+if (query.isError()) {
+  console.error(query.error());
+}
+```
+
+### Error not displaying
+
+Ensure you're accessing signals correctly:
+
+```typescript
+// ❌ Wrong - missing ()
+@if (query.isError) { ... }
+
+// ✅ Correct - with ()
+@if (query.isError()) { ... }
+```
+
+### Type errors with error object
+
+Use type guards to narrow error types:
+
+```typescript
+if (isFetchBaseQueryError(error)) {
+  console.log(error.status); // Type-safe
+}
+```

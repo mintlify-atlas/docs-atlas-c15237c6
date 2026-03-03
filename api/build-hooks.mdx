@@ -1,0 +1,370 @@
+---
+title: buildHooks
+description: Internal function that generates Angular-compatible hooks from RTK Query endpoints
+---
+
+`buildHooks` is an internal function that generates Angular Signal-based hooks for queries, lazy queries, infinite queries, and mutations. It adapts RTK Query's React hooks to work with Angular's reactive primitives.
+
+<Note>
+This is an internal API used by `createApi`. You typically don't need to call this function directly. It's documented here for advanced use cases and contributors.
+</Note>
+
+## Function Signature
+
+```typescript
+function buildHooks<Definitions extends EndpointDefinitions>({
+  api,
+  moduleOptions,
+  serializeQueryArgs,
+  context,
+}: {
+  api: Api<any, Definitions, any, any, CoreModule>;
+  moduleOptions: AngularHooksModuleOptions;
+  serializeQueryArgs: SerializeQueryArgs<any>;
+  context: ApiContext<Definitions>;
+}): {
+  buildQueryHooks: (endpointName: string) => QueryHooks<any>;
+  buildInfiniteQueryHooks: (endpointName: string) => InfiniteQueryHooks<any>;
+  buildMutationHook: (endpointName: string) => MutationHooks<any>;
+  usePrefetch: <EndpointName extends QueryKeys<Definitions>>(
+    endpointName: EndpointName,
+    defaultOptions?: PrefetchOptions
+  ) => (arg: any, options?: PrefetchOptions) => void;
+}
+```
+
+## Parameters
+
+<ParamField path="api" type="Api" required>
+  The RTK Query API instance created by `buildCreateApi`.
+</ParamField>
+
+<ParamField path="moduleOptions" type="AngularHooksModuleOptions" required>
+  Angular-specific hooks configuration
+
+  <Expandable title="properties">
+    <ParamField path="hooks.dispatch" type="Dispatch">
+      The dispatch function for triggering actions.
+    </ParamField>
+
+    <ParamField path="hooks.useSelector" type="UseSelector">
+      Function to select and subscribe to store state.
+    </ParamField>
+
+    <ParamField path="hooks.getState" type="() => State">
+      Function to get current store state.
+    </ParamField>
+
+    <ParamField path="createSelector" type="CreateSelector">
+      Selector creation function (e.g., from `@ngrx/store`).
+    </ParamField>
+
+    <ParamField path="getInjector" type="() => Injector">
+      Function to get Angular's current injector.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="serializeQueryArgs" type="SerializeQueryArgs" required>
+  Function used to serialize query arguments for cache key generation.
+</ParamField>
+
+<ParamField path="context" type="ApiContext" required>
+  API context containing endpoint definitions and configuration.
+</ParamField>
+
+## Return Value
+
+<ResponseField name="buildQueryHooks" type="(endpointName: string) => QueryHooks">
+  Function that generates standard query hooks for an endpoint.
+
+  Returns an object with:
+  - `useQuery`: Automatic query hook with subscription
+  - `useLazyQuery`: Manual query hook
+  - `useQueryState`: Hook for reading query state without subscription
+  - `useQuerySubscription`: Hook for subscription without state
+  - `useLazyQuerySubscription`: Hook for lazy subscription
+</ResponseField>
+
+<ResponseField name="buildInfiniteQueryHooks" type="(endpointName: string) => InfiniteQueryHooks">
+  Function that generates infinite query hooks for paginated data.
+
+  Returns an object with:
+  - `useInfiniteQuery`: Automatic infinite query hook
+  - `useInfiniteQueryState`: Hook for reading infinite query state
+  - `useInfiniteQuerySubscription`: Hook for infinite query subscription
+</ResponseField>
+
+<ResponseField name="buildMutationHook" type="(endpointName: string) => MutationHooks">
+  Function that generates mutation hooks for an endpoint.
+
+  Returns an object with:
+  - `useMutation`: Hook for triggering mutations
+</ResponseField>
+
+<ResponseField name="usePrefetch" type="function">
+  Function to create a prefetch callback for an endpoint.
+</ResponseField>
+
+## Generated Hook Types
+
+### Query Hooks
+
+Query hooks are generated for `build.query()` endpoints:
+
+```typescript
+interface QueryHooks<Definition> {
+  // Combined hook - subscription + state
+  useQuery: (arg, options?) => QueryResult & { refetch: () => void };
+  
+  // Manual trigger hook
+  useLazyQuery: (options?) => LazyQueryTrigger & QueryResult & { reset: () => void };
+  
+  // State-only hook (no subscription)
+  useQueryState: (arg, options?) => QueryResult;
+  
+  // Subscription-only hook (no state)
+  useQuerySubscription: (arg, options?) => { refetch: () => void };
+  
+  // Manual subscription hook
+  useLazyQuerySubscription: (options?) => [
+    trigger: (arg, options?) => Promise,
+    lastArg: Signal<Arg>,
+    { reset: () => void }
+  ];
+}
+```
+
+### Infinite Query Hooks
+
+Infinite query hooks are generated for `build.infiniteQuery()` endpoints:
+
+```typescript
+interface InfiniteQueryHooks<Definition> {
+  // Combined hook - subscription + state + pagination
+  useInfiniteQuery: (arg, options?) => InfiniteQueryResult & {
+    refetch: (options?) => void;
+    fetchNextPage: () => void;
+    fetchPreviousPage: () => void;
+  };
+  
+  // State-only hook
+  useInfiniteQueryState: (arg, options?) => InfiniteQueryResult;
+  
+  // Subscription-only hook
+  useInfiniteQuerySubscription: (arg, options?) => {
+    refetch: (options?) => void;
+    trigger: (arg, direction) => Promise;
+    fetchNextPage: () => void;
+    fetchPreviousPage: () => void;
+  };
+}
+```
+
+### Mutation Hooks
+
+Mutation hooks are generated for `build.mutation()` endpoints:
+
+```typescript
+interface MutationHooks<Definition> {
+  useMutation: (options?) => MutationTrigger & MutationResult & {
+    originalArgs: Signal<Arg | undefined>;
+    reset: () => void;
+  };
+}
+```
+
+## Key Implementation Details
+
+### Signal-Based Reactivity
+
+All hooks return Angular Signals for reactive state:
+
+```typescript
+const query = useGetPostsQuery();
+
+// Access state via signals
+query.data();         // Signal<Post[] | undefined>
+query.isLoading();    // Signal<boolean>
+query.error();        // Signal<Error | undefined>
+```
+
+### Signal Proxy for Fine-Grained Reactivity
+
+The hooks use `signalProxy` to enable fine-grained change detection:
+
+```typescript
+// Each property is a separate signal
+query.isLoading();  // Only re-renders when isLoading changes
+query.data();       // Only re-renders when data changes
+
+// Better than:
+const state = query();
+state.isLoading;    // Re-renders on ANY state change
+```
+
+### Automatic Cleanup
+
+Hooks automatically clean up subscriptions using Angular's `DestroyRef`:
+
+```typescript
+function usePromiseRefUnsubscribeOnUnmount(promiseRef: UnsubscribePromiseRef) {
+  inject(DestroyRef).onDestroy(() => {
+    unsubscribePromiseRef(promiseRef);
+    promiseRef.current = undefined;
+  });
+}
+```
+
+### Query State Pre-Selector
+
+The `noPendingQueryStateSelector` ensures queries start in a "pending" state instead of "uninitialized":
+
+```typescript
+const noPendingQueryStateSelector: QueryStateSelector<any, any> = (selected) => {
+  if (selected.isUninitialized) {
+    return {
+      ...selected,
+      isUninitialized: false,
+      isFetching: true,
+      isLoading: selected.data !== undefined ? false : true,
+      status: QueryStatus.pending,
+    };
+  }
+  return selected;
+};
+```
+
+This provides a better user experience by showing loading states immediately.
+
+### Stable Query Args
+
+The `useStableQueryArgs` utility ensures query arguments are stable across re-renders:
+
+```typescript
+const stableArg = useStableQueryArgs(subscriptionArg);
+```
+
+This prevents unnecessary re-fetches when arg objects have the same serialized value.
+
+## Hook Generation Flow
+
+1. **API Creation**: `createApi` is called with endpoint definitions
+2. **Hook Building**: For each endpoint, `buildHooks` generates appropriate hook functions
+3. **Hook Attachment**: Hooks are attached to the API object (e.g., `api.useGetPostsQuery`)
+4. **Named Exports**: Hooks are also available as named exports (e.g., `useGetPostsQuery`)
+
+## Adaptation from React Hooks
+
+The Angular hooks mirror RTK Query's React hooks but use Angular primitives:
+
+| React                 | Angular              |
+|-----------------------|----------------------|
+| `useState`            | `signal()`           |
+| `useEffect`           | `effect()`           |
+| `useRef`              | `{ current: T }`     |
+| `useMemo`             | `computed()`         |
+| `useSelector`         | `selectSignal()`     |
+| Effect cleanup        | `DestroyRef.onDestroy` |
+
+## Example: Complete Hook Usage
+
+```typescript
+import { Component, ChangeDetectionStrategy, signal } from '@angular/core';
+import { skipToken } from '@reduxjs/toolkit/query';
+import {
+  useGetPostsQuery,
+  useLazyGetPostQuery,
+  useAddPostMutation,
+  useGetPostsInfiniteQuery,
+} from './api';
+
+@Component({
+  selector: 'app-posts',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <!-- Standard Query -->
+    @if (postsQuery.isLoading()) {
+      <p>Loading posts...</p>
+    }
+    @if (postsQuery.data(); as posts) {
+      <ul>
+        @for (post of posts; track post.id) {
+          <li (click)="loadPostDetails(post.id)">{{ post.title }}</li>
+        }
+      </ul>
+    }
+
+    <!-- Lazy Query -->
+    <button (click)="loadPostDetails(selectedId())">Load Details</button>
+    @if (postDetailsQuery.data(); as post) {
+      <h2>{{ post.title }}</h2>
+      <p>{{ post.content }}</p>
+    }
+
+    <!-- Mutation -->
+    <button 
+      [disabled]="addPost.isLoading()" 
+      (click)="createPost()">
+      Add Post
+    </button>
+
+    <!-- Infinite Query -->
+    @if (infiniteQuery.data(); as result) {
+      @for (page of result.pages; track $index) {
+        @for (post of page; track post.id) {
+          <div>{{ post.title }}</div>
+        }
+      }
+      <button 
+        [disabled]="infiniteQuery.isFetchingNextPage()" 
+        (click)="infiniteQuery.fetchNextPage()">
+        Load More
+      </button>
+    }
+  `,
+})
+export class PostsComponent {
+  selectedId = signal<number | null>(null);
+
+  // Standard query - auto-fetches on mount
+  postsQuery = useGetPostsQuery();
+
+  // Lazy query - manual control
+  postDetailsQuery = useLazyGetPostQuery();
+
+  // Mutation
+  addPost = useAddPostMutation();
+
+  // Infinite query
+  infiniteQuery = useGetPostsInfiniteQuery(
+    { limit: 10 },
+    { initialPageParam: 0 }
+  );
+
+  loadPostDetails(id: number) {
+    this.selectedId.set(id);
+    this.postDetailsQuery(id).unwrap();
+  }
+
+  createPost() {
+    this.addPost({ title: 'New Post', content: 'Hello!' })
+      .unwrap()
+      .then(() => console.log('Created!'))
+      .catch((err) => console.error('Failed:', err));
+  }
+}
+```
+
+## Source Reference
+
+Source: [`packages/ngrx-rtk-query/core/src/build-hooks.ts:82-717`](https://github.com/SaulMoro/ngrx-rtk-query/blob/main/packages/ngrx-rtk-query/core/src/build-hooks.ts#L82)
+
+## See Also
+
+- [createApi](/api/create-api) - Main API creation function
+- [useQuery Hook](/api/hooks/use-query) - Query hook reference
+- [useMutation Hook](/api/hooks/use-mutation) - Mutation hook reference
+- [useInfiniteQuery Hook](/api/hooks/use-infinite-query) - Infinite query hook reference
+- [Angular Signals](https://angular.dev/guide/signals) - Angular's reactivity primitives

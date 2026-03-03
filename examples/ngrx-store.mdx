@@ -1,0 +1,240 @@
+---
+title: "With NgRx Store"
+description: "Integrate ngrx-rtk-query with NgRx Store and Redux DevTools for full state management"
+---
+
+This example shows how to use ngrx-rtk-query with NgRx Store, enabling Redux DevTools and full integration with your existing NgRx state management.
+
+## App Configuration
+
+Use `provideStore()` and `provideStoreApi()` to integrate with NgRx Store:
+
+```typescript app/app.config.ts
+import { type ApplicationConfig, isDevMode } from '@angular/core';
+import {
+  PreloadAllModules,
+  provideRouter,
+  withComponentInputBinding,
+  withEnabledBlockingInitialNavigation,
+  withPreloading,
+} from '@angular/router';
+import { provideStore } from '@ngrx/store';
+import { provideStoreDevtools } from '@ngrx/store-devtools';
+import { provideStoreApi } from 'ngrx-rtk-query';
+
+import { appRoutes } from './app.routes';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideStore(),
+    provideStoreDevtools({
+      name: 'RTK Query App',
+      logOnly: !isDevMode(),
+    }),
+    provideStoreApi(postsApi),
+
+    provideRouter(
+      appRoutes,
+      withPreloading(PreloadAllModules),
+      withComponentInputBinding(),
+      withEnabledBlockingInitialNavigation(),
+    ),
+  ],
+};
+```
+
+<Note>
+**Order matters**: `provideStore()` must come before `provideStoreApi()`. You can register multiple APIs by calling `provideStoreApi()` multiple times.
+</Note>
+
+## API Definition
+
+The API definition remains the same as the basic usage example:
+
+```typescript app/posts/api.ts
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+import { type Post } from './post.model';
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({
+      query: () => ({ url: '/posts' }),
+      providesTags: (result) =>
+        result
+          ? [...result.map(({ id }) => ({ type: 'Posts', id }) as const), { type: 'Posts', id: 'LIST' }]
+          : [{ type: 'Posts', id: 'LIST' }],
+    }),
+    getPost: build.query<Post, number>({
+      query: (id) => `/posts/${id}`,
+      providesTags: (result, error, id) => [{ type: 'Posts', id }],
+    }),
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({
+        url: `/posts`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+    updatePost: build.mutation<Post, Partial<Post>>({
+      query: (data) => {
+        const { id, ...body } = data;
+        return {
+          url: `/posts/${id}`,
+          method: 'PUT',
+          body,
+        };
+      },
+      invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+    }),
+    deletePost: build.mutation<{ success: boolean; id: number }, number>({
+      query: (id) => ({
+        url: `/posts/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+  }),
+});
+
+export const { useGetPostQuery, useGetPostsQuery, useAddPostMutation, useDeletePostMutation, useUpdatePostMutation } =
+  postsApi;
+```
+
+## Component Usage
+
+Components use the same hooks regardless of store type:
+
+```typescript app/posts/posts-list.component.ts
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import { useAddPostMutation, useGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-posts-list',
+  standalone: true,
+  imports: [FormsModule, RouterLink],
+  template: `
+    <section class="mb-4">
+      <input
+        placeholder="New post name"
+        type="text"
+        [ngModel]="postNameControl()"
+        (ngModelChange)="postNameControl.set($event)"
+      />
+      <button
+        [disabled]="!postNameControl() || addPost.isLoading()"
+        (click)="addNewPost()"
+      >
+        {{ addPost.isLoading() ? 'Adding...' : 'Add Post' }}
+      </button>
+    </section>
+    <section>
+      <h1>Posts List</h1>
+      @if (postsQuery.isLoading()) {
+        <small>Loading...</small>
+      }
+      @if (postsQuery.data(); as posts) {
+        @for (post of posts; track post.id) {
+          <li>
+            <a [routerLink]="[post.id]">{{ post.name }}</a>
+          </li>
+        }
+      }
+    </section>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class PostsListComponent {
+  readonly postsQuery = useGetPostsQuery();
+  readonly addPost = useAddPostMutation();
+  readonly postNameControl = signal('');
+
+  addNewPost() {
+    this.addPost({ name: this.postNameControl() })
+      .unwrap()
+      .then(() => this.postNameControl.set(''));
+  }
+}
+```
+
+## Redux DevTools Integration
+
+With NgRx Store, you get full Redux DevTools support:
+
+- **State Inspection**: View cached queries and mutations under the API's `reducerPath` (default: API name)
+- **Action Tracking**: See all RTK Query actions (query start, success, error, etc.)
+- **Time Travel**: Step through query/mutation history
+- **State Export/Import**: Save and restore cache state
+
+<Tip>
+Open Redux DevTools and look for the `postsApi` reducer to see cached queries and their status.
+</Tip>
+
+## Multiple APIs
+
+You can register multiple APIs with different reducer paths:
+
+```typescript app.config.ts
+import { provideStoreApi } from 'ngrx-rtk-query';
+import { postsApi } from './posts/api';
+import { usersApi } from './users/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideStore(),
+    provideStoreDevtools({ name: 'My App' }),
+    provideStoreApi(postsApi),
+    provideStoreApi(usersApi),
+    // ...
+  ],
+};
+```
+
+## Lazy-Loaded APIs
+
+For code splitting, register APIs in lazy route providers:
+
+```typescript app/admin/admin.routes.ts
+import { Route } from '@angular/router';
+import { provideStoreApi } from 'ngrx-rtk-query';
+import { adminApi } from './admin-api';
+
+export const adminRoutes: Route[] = [
+  {
+    path: '',
+    providers: [provideStoreApi(adminApi)],
+    children: [
+      // admin routes...
+    ],
+  },
+];
+```
+
+<Note>
+When a lazy-loaded module is destroyed, its API cache is cleaned up automatically.
+</Note>
+
+## Benefits of NgRx Store Integration
+
+- **DevTools**: Full Redux DevTools support for debugging
+- **State Persistence**: Use `@ngrx/store` persistence plugins
+- **Selectors**: Create custom selectors that combine RTK Query cache with other NgRx state
+- **Middleware**: Leverage NgRx effects and meta-reducers
+- **Consistency**: Unified state management across your app
+
+## When to Use NgRx Store
+
+Choose this approach when:
+
+- You're already using NgRx Store in your app
+- You need Redux DevTools for debugging
+- You want state persistence capabilities
+- You need to combine API cache with other global state
+- You prefer a centralized store architecture
+
+For a lighter alternative without NgRx dependencies, see [Noop Store](/examples/noop-store).

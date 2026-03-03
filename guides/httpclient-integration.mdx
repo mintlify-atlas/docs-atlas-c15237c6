@@ -1,0 +1,596 @@
+---
+title: HttpClient Integration
+description: Use Angular HttpClient with ngrx-rtk-query for interceptors and custom configurations
+---
+
+## Overview
+
+While ngrx-rtk-query includes a built-in `fetchBaseQuery` using the Fetch API, you can integrate Angular's `HttpClient` to leverage interceptors, custom configurations, and existing HTTP infrastructure.
+
+## Why Use HttpClient?
+
+Angular's `HttpClient` provides:
+
+- **Interceptors**: Authentication tokens, error handling, logging
+- **Request/Response transformations**: Automatic JSON parsing
+- **Progress events**: Upload/download progress tracking
+- **Test utilities**: Built-in testing support with `HttpTestingController`
+- **Type safety**: Full TypeScript support
+- **RxJS integration**: Observable-based API
+
+## Basic HttpClient Integration
+
+Create a custom base query that uses Angular's `HttpClient`:
+
+<Steps>
+  <Step title="Create HttpClient base query">
+    ```typescript http-base-query.ts
+    import { inject } from '@angular/core';
+    import { HttpClient, type HttpErrorResponse } from '@angular/common/http';
+    import { lastValueFrom } from 'rxjs';
+    import { fetchBaseQuery } from 'ngrx-rtk-query';
+
+    export const httpClientBaseQuery = fetchBaseQuery(
+      (http = inject(HttpClient)) => {
+        return async (args, { signal }) => {
+          const {
+            url,
+            method = 'GET',
+            body = undefined,
+            params = undefined,
+          } = typeof args === 'string' ? { url: args } : args;
+
+          try {
+            const data = await lastValueFrom(
+              http.request(method, url, {
+                body,
+                params,
+                // Note: HttpClient doesn't support AbortSignal directly
+              })
+            );
+            return { data };
+          } catch (error) {
+            const httpError = error as HttpErrorResponse;
+            return {
+              error: {
+                status: httpError.status,
+                data: httpError.message,
+              },
+            };
+          }
+        };
+      }
+    );
+    ```
+  </Step>
+
+  <Step title="Use in your API definition">
+    ```typescript api.ts
+    import { createApi } from 'ngrx-rtk-query';
+    import { httpClientBaseQuery } from './http-base-query';
+
+    export interface Post {
+      id: number;
+      name: string;
+      content: string;
+    }
+
+    export const postsApi = createApi({
+      reducerPath: 'postsApi',
+      baseQuery: httpClientBaseQuery,
+      tagTypes: ['Posts'],
+      endpoints: (build) => ({
+        getPosts: build.query<Post[], void>({
+          query: () => ({ url: '/posts' }),
+          providesTags: ['Posts'],
+        }),
+        addPost: build.mutation<Post, Partial<Post>>({
+          query: (body) => ({
+            url: '/posts',
+            method: 'POST',
+            body,
+          }),
+          invalidatesTags: ['Posts'],
+        }),
+      }),
+    });
+
+    export const { useGetPostsQuery, useAddPostMutation } = postsApi;
+    ```
+  </Step>
+
+  <Step title="Provide HttpClient">
+    ```typescript app.config.ts
+    import { ApplicationConfig } from '@angular/core';
+    import { provideHttpClient, withInterceptors } from '@angular/common/http';
+    import { provideStoreApi } from 'ngrx-rtk-query';
+    import { postsApi } from './api';
+    import { authInterceptor } from './auth.interceptor';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideHttpClient(
+          withInterceptors([authInterceptor])
+        ),
+        provideStore(),
+        provideStoreApi(postsApi),
+      ],
+    };
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The base query uses `inject()` to access `HttpClient` within the Angular DI context.
+</Note>
+
+## With Base URL from Environment
+
+Inject environment configuration for dynamic base URLs:
+
+```typescript http-base-query.ts
+import { inject } from '@angular/core';
+import { HttpClient, type HttpErrorResponse } from '@angular/common/http';
+import { lastValueFrom } from 'rxjs';
+import { fetchBaseQuery } from 'ngrx-rtk-query';
+import { ENVIRONMENT } from './environment.token';
+
+export const httpClientBaseQuery = fetchBaseQuery(
+  (
+    http = inject(HttpClient),
+    environment = inject(ENVIRONMENT)
+  ) => {
+    return async (args, { signal }) => {
+      const {
+        url,
+        method = 'GET',
+        body = undefined,
+        params = undefined,
+      } = typeof args === 'string' ? { url: args } : args;
+
+      const fullUrl = `${environment.baseAPI}${url}`;
+
+      try {
+        const data = await lastValueFrom(
+          http.request(method, fullUrl, { body, params })
+        );
+        return { data };
+      } catch (error) {
+        const httpError = error as HttpErrorResponse;
+        return {
+          error: {
+            status: httpError.status,
+            data: httpError.message,
+          },
+        };
+      }
+    };
+  }
+);
+```
+
+<Tabs>
+  <Tab title="Environment Token">
+    ```typescript environment.token.ts
+    import { InjectionToken } from '@angular/core';
+
+    export interface Environment {
+      baseAPI: string;
+      production: boolean;
+    }
+
+    export const ENVIRONMENT = new InjectionToken<Environment>('ENVIRONMENT');
+    ```
+  </Tab>
+
+  <Tab title="Provider">
+    ```typescript app.config.ts
+    import { ENVIRONMENT } from './environment.token';
+    import { environment } from './environment';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        { provide: ENVIRONMENT, useValue: environment },
+        provideHttpClient(),
+        provideStoreApi(postsApi),
+      ],
+    };
+    ```
+  </Tab>
+</Tabs>
+
+## Authentication Interceptor
+
+Add authentication tokens using HttpClient interceptors:
+
+<Steps>
+  <Step title="Create auth interceptor">
+    ```typescript auth.interceptor.ts
+    import { inject } from '@angular/core';
+    import { HttpInterceptorFn } from '@angular/common/http';
+    import { AuthService } from './auth.service';
+
+    export const authInterceptor: HttpInterceptorFn = (req, next) => {
+      const authService = inject(AuthService);
+      const token = authService.getToken();
+
+      if (token) {
+        const clonedRequest = req.clone({
+          setHeaders: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        return next(clonedRequest);
+      }
+
+      return next(req);
+    };
+    ```
+  </Step>
+
+  <Step title="Register interceptor">
+    ```typescript app.config.ts
+    import { provideHttpClient, withInterceptors } from '@angular/common/http';
+    import { authInterceptor } from './auth.interceptor';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideHttpClient(
+          withInterceptors([authInterceptor])
+        ),
+        provideStoreApi(postsApi),
+      ],
+    };
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  All RTK Query requests will automatically include the authentication token.
+</Note>
+
+## Error Handling Interceptor
+
+Handle errors globally with an interceptor:
+
+```typescript error.interceptor.ts
+import { inject } from '@angular/core';
+import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
+import { catchError, throwError } from 'rxjs';
+import { NotificationService } from './notification.service';
+
+export const errorInterceptor: HttpInterceptorFn = (req, next) => {
+  const notificationService = inject(NotificationService);
+
+  return next(req).pipe(
+    catchError((error: HttpErrorResponse) => {
+      let errorMessage = 'An error occurred';
+
+      if (error.error instanceof ErrorEvent) {
+        // Client-side error
+        errorMessage = `Error: ${error.error.message}`;
+      } else {
+        // Server-side error
+        errorMessage = `Error Code: ${error.status}\nMessage: ${error.message}`;
+      }
+
+      notificationService.showError(errorMessage);
+      return throwError(() => error);
+    })
+  );
+};
+```
+
+## Logging Interceptor
+
+Log all HTTP requests and responses:
+
+```typescript logging.interceptor.ts
+import { HttpInterceptorFn } from '@angular/common/http';
+import { tap } from 'rxjs';
+
+export const loggingInterceptor: HttpInterceptorFn = (req, next) => {
+  const startTime = Date.now();
+  console.log(`→ ${req.method} ${req.url}`);
+
+  return next(req).pipe(
+    tap({
+      next: (event) => {
+        if (event.type === 4) { // HttpResponse
+          const duration = Date.now() - startTime;
+          console.log(`← ${req.method} ${req.url} (${duration}ms)`);
+        }
+      },
+      error: (error) => {
+        const duration = Date.now() - startTime;
+        console.error(`✗ ${req.method} ${req.url} (${duration}ms)`, error);
+      },
+    })
+  );
+};
+```
+
+## Custom Headers
+
+Add custom headers to specific endpoints:
+
+<CodeGroup>
+  ```typescript Per-Endpoint Headers
+  export const postsApi = createApi({
+    baseQuery: httpClientBaseQuery,
+    endpoints: (build) => ({
+      getPosts: build.query<Post[], void>({
+        query: () => ({
+          url: '/posts',
+          headers: {
+            'X-Custom-Header': 'value',
+          },
+        }),
+      }),
+    }),
+  });
+  ```
+
+  ```typescript Global Headers (Interceptor)
+  export const customHeadersInterceptor: HttpInterceptorFn = (req, next) => {
+    const clonedRequest = req.clone({
+      setHeaders: {
+        'X-API-Version': '2.0',
+        'X-Client-Type': 'angular',
+      },
+    });
+    return next(clonedRequest);
+  };
+  ```
+</CodeGroup>
+
+## Request Retry Logic
+
+Implement automatic retry with exponential backoff:
+
+```typescript retry.interceptor.ts
+import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
+import { retry, timer } from 'rxjs';
+
+export const retryInterceptor: HttpInterceptorFn = (req, next) => {
+  return next(req).pipe(
+    retry({
+      count: 3,
+      delay: (error: HttpErrorResponse, retryCount) => {
+        // Don't retry 4xx errors (client errors)
+        if (error.status >= 400 && error.status < 500) {
+          throw error;
+        }
+        
+        // Exponential backoff: 1s, 2s, 4s
+        const delayMs = Math.pow(2, retryCount - 1) * 1000;
+        console.log(`Retry attempt ${retryCount} after ${delayMs}ms`);
+        return timer(delayMs);
+      },
+    })
+  );
+};
+```
+
+## Testing with HttpClient
+
+Test API calls with `HttpTestingController`:
+
+```typescript posts.service.spec.ts
+import { TestBed } from '@angular/core/testing';
+import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { provideStore } from '@ngrx/store';
+import { provideStoreApi } from 'ngrx-rtk-query';
+import { postsApi, useGetPostsQuery } from './api';
+
+describe('Posts API', () => {
+  let httpMock: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [
+        provideStore(),
+        provideStoreApi(postsApi),
+      ],
+    });
+
+    httpMock = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    httpMock.verify();
+  });
+
+  it('should fetch posts', async () => {
+    const mockPosts = [{ id: 1, name: 'Test Post', content: 'Content' }];
+    
+    const query = useGetPostsQuery();
+
+    const req = httpMock.expectOne('/posts');
+    expect(req.request.method).toBe('GET');
+    req.flush(mockPosts);
+
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(query.data()).toEqual(mockPosts);
+  });
+});
+```
+
+## Complete Example
+
+Here's a complete example with multiple interceptors:
+
+<Steps>
+  <Step title="Create base query">
+    ```typescript http-base-query.ts
+    import { inject } from '@angular/core';
+    import { HttpClient, type HttpErrorResponse } from '@angular/common/http';
+    import { lastValueFrom } from 'rxjs';
+    import { fetchBaseQuery } from 'ngrx-rtk-query';
+
+    export const httpClientBaseQuery = fetchBaseQuery(
+      (http = inject(HttpClient)) => {
+        return async (args, api) => {
+          const {
+            url,
+            method = 'GET',
+            body = undefined,
+            params = undefined,
+          } = typeof args === 'string' ? { url: args } : args;
+
+          try {
+            const data = await lastValueFrom(
+              http.request(method, url, { body, params })
+            );
+            return { data };
+          } catch (error) {
+            const httpError = error as HttpErrorResponse;
+            return {
+              error: {
+                status: httpError.status,
+                data: httpError.error || httpError.message,
+              },
+            };
+          }
+        };
+      }
+    );
+    ```
+  </Step>
+
+  <Step title="Create API">
+    ```typescript api.ts
+    import { createApi } from 'ngrx-rtk-query';
+    import { httpClientBaseQuery } from './http-base-query';
+
+    export const postsApi = createApi({
+      reducerPath: 'postsApi',
+      baseQuery: httpClientBaseQuery,
+      tagTypes: ['Posts'],
+      endpoints: (build) => ({
+        getPosts: build.query<Post[], void>({
+          query: () => '/posts',
+        }),
+      }),
+    });
+    ```
+  </Step>
+
+  <Step title="Configure providers">
+    ```typescript app.config.ts
+    import { ApplicationConfig } from '@angular/core';
+    import { provideHttpClient, withInterceptors } from '@angular/common/http';
+    import { provideStoreApi } from 'ngrx-rtk-query';
+    import { postsApi } from './api';
+    import { authInterceptor } from './auth.interceptor';
+    import { errorInterceptor } from './error.interceptor';
+    import { loggingInterceptor } from './logging.interceptor';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideHttpClient(
+          withInterceptors([
+            authInterceptor,
+            errorInterceptor,
+            loggingInterceptor,
+          ])
+        ),
+        provideStore(),
+        provideStoreApi(postsApi),
+      ],
+    };
+    ```
+  </Step>
+</Steps>
+
+## Fetch vs HttpClient
+
+<Tabs>
+  <Tab title="Feature Comparison">
+    | Feature | Fetch API | HttpClient |
+    |---------|-----------|------------|
+    | Bundle Size | Smaller | Larger |
+    | Interceptors | ❌ No | ✅ Yes |
+    | Progress Events | ❌ No | ✅ Yes |
+    | RxJS Integration | ❌ No | ✅ Yes |
+    | Test Utilities | Limited | ✅ HttpTestingController |
+    | Browser Support | Modern | All |
+    | Setup Complexity | Simple | Moderate |
+  </Tab>
+
+  <Tab title="When to Use">
+    **Use Fetch API when:**
+    - You want minimal bundle size
+    - You don't need interceptors
+    - Building a simple application
+    - Modern browser support is sufficient
+
+    **Use HttpClient when:**
+    - You need authentication interceptors
+    - You want global error handling
+    - You need request/response logging
+    - You're using other Angular HTTP features
+    - You need progress tracking
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<Steps>
+  <Step title="Centralize base query">
+    Create a single base query file and reuse it across all APIs.
+  </Step>
+
+  <Step title="Use interceptors for cross-cutting concerns">
+    Handle authentication, logging, and error handling in interceptors instead of base query.
+  </Step>
+
+  <Step title="Type your error responses">
+    Define error interfaces for consistent error handling:
+    ```typescript
+    interface ApiError {
+      status: number;
+      message: string;
+      details?: string[];
+    }
+    ```
+  </Step>
+
+  <Step title="Leverage environment configuration">
+    Use injection tokens for environment-specific values like base URLs.
+  </Step>
+
+  <Step title="Test with HttpTestingController">
+    Use Angular's built-in testing utilities for HTTP mocking.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### HttpClient not found
+
+<Warning>
+  Ensure `provideHttpClient()` is added to your providers.
+</Warning>
+
+```typescript
+providers: [
+  provideHttpClient(), // Required
+  provideStoreApi(postsApi),
+]
+```
+
+### Interceptor not running
+
+Make sure interceptors are registered:
+
+```typescript
+provideHttpClient(
+  withInterceptors([authInterceptor, errorInterceptor])
+)
+```
+
+### CORS errors
+
+CORS is configured on the server side. Ensure your API allows requests from your Angular app's origin.

@@ -1,80 +1,389 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Build your first API integration with ngrx-rtk-query in minutes
 ---
 
-## Get started in three steps
+# Quick Start
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through creating your first API integration with ngrx-rtk-query, from defining endpoints to using them in your components.
 
-### Step 1: Set up your local environment
+## Overview
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+We'll build a simple posts management feature that demonstrates:
+
+- Creating an API with queries and mutations
+- Configuring the store provider
+- Using queries in components
+- Triggering mutations
+- Working with signal inputs
+
+## Step-by-Step Guide
+
+<Steps>
+  <Step title="Define Your Data Model">
+    Start by creating TypeScript interfaces for your data:
+
+    ```typescript post.model.ts
+    export interface Post {
+      id: number;
+      name: string;
+      fetched_at: string;
+    }
+    ```
+  </Step>
+
+  <Step title="Create Your API Definition">
+    Use `createApi` to define your API endpoints. This will auto-generate typed hooks:
+
+    ```typescript api.ts
+    import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+import { type Post } from './post.model';
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({
+      query: () => ({ url: '/posts' }),
+      providesTags: (result) =>
+        result
+          ? [...result.map(({ id }) => ({ type: 'Posts', id }) as const), { type: 'Posts', id: 'LIST' }]
+          : [{ type: 'Posts', id: 'LIST' }],
+    }),
+    getPost: build.query<Post, number>({
+      query: (id) => `/posts/${id}`,
+      providesTags: (result, error, id) => [{ type: 'Posts', id }],
+    }),
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({
+        url: `/posts`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+    updatePost: build.mutation<Post, Partial<Post>>({
+      query: (data) => {
+        const { id, ...body } = data;
+        return {
+          url: `/posts/${id}`,
+          method: 'PUT',
+          body,
+        };
+      },
+      invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+    }),
+    deletePost: build.mutation<{ success: boolean; id: number }, number>({
+      query: (id) => ({
+        url: `/posts/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+  }),
+});
+
+// Export auto-generated hooks
+export const {
+  useGetPostsQuery,
+  useGetPostQuery,
+  useAddPostMutation,
+  useUpdatePostMutation,
+  useDeletePostMutation,
+} = postsApi;
+    ```
+
+    <Note>
+      The `tagTypes` and cache tags (`providesTags`/`invalidatesTags`) enable automatic cache invalidation when data changes.
+    </Note>
+  </Step>
+
+  <Step title="Configure Your Application">
+    Add the API to your application providers:
+
+    <CodeGroup>
+    ```typescript app.config.ts (With NgRx Store)
+    import { type ApplicationConfig, isDevMode } from '@angular/core';
+import { provideRouter } from '@angular/router';
+import { provideStore } from '@ngrx/store';
+import { provideStoreDevtools } from '@ngrx/store-devtools';
+import { provideStoreApi } from 'ngrx-rtk-query';
+
+import { appRoutes } from './app.routes';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideStore(),
+    provideStoreDevtools({
+      name: 'RTK Query App',
+      logOnly: !isDevMode(),
+    }),
+    provideStoreApi(postsApi),
+    provideRouter(appRoutes),
+  ],
+};
+    ```
+
+    ```typescript app.config.ts (Without NgRx Store)
+    import { type ApplicationConfig } from '@angular/core';
+import { provideRouter } from '@angular/router';
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+
+import { appRoutes } from './app.routes';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideNoopStoreApi(postsApi),
+    provideRouter(appRoutes),
+  ],
+};
+    ```
+    </CodeGroup>
+
+    <Tip>
+      You can disable `setupListeners` if needed: `provideStoreApi(postsApi, { setupListeners: false })`
+    </Tip>
+  </Step>
+
+  <Step title="Use Queries in a Component">
+    Create a list component that fetches and displays posts:
+
+    ```typescript posts-list.component.ts
+    import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import { useAddPostMutation, useGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-posts-list',
+  standalone: true,
+  imports: [FormsModule, RouterLink],
+  template: `
+    <section>
+      <input
+        type="text"
+        placeholder="New post name"
+        [ngModel]="postNameControl()"
+        (ngModelChange)="postNameControl.set($event)"
+      />
+      <button
+        [disabled]="!postNameControl() || addPost.isLoading()"
+        (click)="addNewPost()"
+      >
+        {{ addPost.isLoading() ? 'Adding...' : 'Add Post' }}
+      </button>
+    </section>
+
+    <section>
+      <h1>Posts List</h1>
+      @if (postsQuery.isLoading()) {
+        <small>Loading...</small>
+      }
+      @if (postsQuery.isError()) {
+        <small>Error...</small>
+      }
+      @if (postsQuery.data(); as posts) {
+        @for (post of posts; track post.id) {
+          <li>
+            <a [routerLink]="[post.id]">{{ post.name }}</a>
+          </li>
+        } @empty {
+          <p>No posts :(</p>
+        }
+      }
+    </section>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class PostsListComponent {
+  readonly postsQuery = useGetPostsQuery();
+  readonly addPost = useAddPostMutation();
+  readonly postNameControl = signal('');
+
+  addNewPost() {
+    this.addPost({ name: this.postNameControl() })
+      .unwrap()
+      .then(() => {
+        this.postNameControl.set('');
+      });
+  }
+}
+    ```
+
+    <Note>
+      The query hook returns a signal with properties like `isLoading()`, `isError()`, `data()`, etc. You can access them as `postsQuery.isLoading()` for fine-grained change detection.
+    </Note>
+  </Step>
+
+  <Step title="Use Dynamic Query Arguments">
+    Create a detail component that uses signal inputs:
+
+    ```typescript post-details.component.ts
+    import { ChangeDetectionStrategy, Component, input, numberAttribute, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { JsonPipe } from '@angular/common';
+import { useGetPostQuery, useUpdatePostMutation, useDeletePostMutation } from './api';
+
+@Component({
+  selector: 'app-post-details',
+  standalone: true,
+  imports: [FormsModule, JsonPipe],
+  template: `
+    <h1>{{ postQuery.data()?.name }}</h1>
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    @if (!isEditing()) {
+      <button
+        [disabled]="postQuery.isLoading() || updatePostMutation.isLoading()"
+        (click)="toggleEdit()"
+      >
+        Edit
+      </button>
+      <button
+        [disabled]="postQuery.isFetching()"
+        (click)="postQuery.refetch()"
+      >
+        {{ postQuery.isFetching() ? 'Fetching...' : 'Refresh' }}
+      </button>
+    } @else {
+      <input
+        type="text"
+        [ngModel]="postNameControl()"
+        (ngModelChange)="postNameControl.set($event)"
+      />
+      <button
+        [disabled]="updatePostMutation.isLoading()"
+        (click)="updatePost()"
+      >
+        {{ updatePostMutation.isLoading() ? 'Updating...' : 'Update' }}
+      </button>
+      <button (click)="toggleEdit()">Cancel</button>
+    }
 
-### Step 2: Deploy your changes
+    @if (postQuery.isFetching()) {
+      <p>Loading...</p>
+    }
+    <pre>{{ postQuery.data() | json }}</pre>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class PostDetailsComponent {
+  // Signal input from route parameter
+  readonly id = input.required({ transform: numberAttribute });
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+  // Query with signal input and polling
+  readonly postQuery = useGetPostQuery(this.id, {
+    pollingInterval: 5000,
+  });
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  readonly updatePostMutation = useUpdatePostMutation();
+  readonly deletePostMutation = useDeletePostMutation();
+  
+  readonly postNameControl = signal('');
+  readonly isEditing = signal(false);
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  updatePost(): void {
+    this.updatePostMutation({ id: this.id(), name: this.postNameControl() })
+      .unwrap()
+      .then(() => this.toggleEdit());
+  }
 
-### Step 3: Go live
+  toggleEdit(): void {
+    this.isEditing.update((isEditing) => !isEditing);
+  }
+}
+    ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    <Tip>
+      Pass signal inputs directly to query hooks - they'll automatically react to changes! You can also pass functions for computed values: `useGetPostQuery(() => this.userId())`
+    </Tip>
+  </Step>
+</Steps>
 
-## Next steps
+## Key Concepts
 
-Now that you have your docs running, explore these key features:
+### Auto-Generated Hooks
+
+When you export hooks from your API, they're fully typed and ready to use:
+
+```typescript
+const postsQuery = useGetPostsQuery(); // Returns Signal with data, isLoading, etc.
+const addPost = useAddPostMutation();   // Returns mutation trigger + state
+```
+
+### Signal Access Patterns
+
+You can access query/mutation state in two ways:
+
+```typescript
+// Fine-grained (recommended for better change detection)
+postsQuery.isLoading()  // Direct signal access
+postsQuery.data()       // Direct signal access
+
+// Object access (also works)
+postsQuery().isLoading  // Access via main signal
+postsQuery().data       // Access via main signal
+```
+
+### Cache Invalidation
+
+Use tags to automatically invalidate and refetch data:
+
+- `providesTags`: Tags that this endpoint provides
+- `invalidatesTags`: Tags to invalidate when mutation succeeds
+
+```typescript
+getPosts: build.query({
+  providesTags: [{ type: 'Posts', id: 'LIST' }],
+}),
+addPost: build.mutation({
+  invalidatesTags: [{ type: 'Posts', id: 'LIST' }], // Refetches getPosts
+}),
+```
+
+### Mutation Unwrapping
+
+Use `.unwrap()` to handle success/error:
+
+```typescript
+this.addPost({ name: 'New Post' })
+  .unwrap()
+  .then((data) => {
+    // Handle success
+  })
+  .catch((error) => {
+    // Handle error
+  });
+
+// Or with async/await
+try {
+  const data = await this.addPost({ name: 'New Post' }).unwrap();
+  // Handle success
+} catch (error) {
+  // Handle error
+}
+```
+
+## What's Next?
+
+Now that you've built your first API integration, explore more advanced features:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Queries" icon="database" href="/concepts/queries">
+    Learn about lazy queries, skip tokens, and query options
+  </Card>
+  <Card title="Mutations" icon="pen-to-square" href="/concepts/mutations">
+    Master mutations, optimistic updates, and error handling
+  </Card>
+  <Card title="Infinite Queries" icon="infinity" href="/concepts/infinite-queries">
+    Implement pagination and infinite scrolling
+  </Card>
+  <Card title="Code Splitting" icon="code-branch" href="/guides/code-splitting">
+    Learn how to lazy-load API definitions
+  </Card>
 </CardGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  You can follow the official [RTK Query guide](https://redux-toolkit.js.org/rtk-query/overview) with slight variations for Angular-specific patterns.
 </Note>

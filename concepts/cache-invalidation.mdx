@@ -1,0 +1,510 @@
+---
+title: Cache Invalidation
+description: Keep your cache fresh by automatically invalidating and refetching data after mutations
+---
+
+## Overview
+
+Cache invalidation is the mechanism that keeps your data fresh after mutations. When you create, update, or delete data, ngrx-rtk-query can automatically refetch affected queries using a tag-based system.
+
+This eliminates the need for manual refetching and ensures your UI stays in sync with the server.
+
+## Tag System
+
+The cache invalidation system uses **tags** to establish relationships between queries and mutations:
+
+- **Queries** use `providesTags` to declare what data they contain
+- **Mutations** use `invalidatesTags` to declare what data they affect
+
+When a mutation invalidates tags, all queries providing those tags are automatically refetched.
+
+## Defining Tags
+
+First, declare the tag types in your API:
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],  // Define available tag types
+  endpoints: (build) => ({
+    // Endpoints go here...
+  }),
+});
+```
+
+<Note>
+`tagTypes` is an array of string identifiers. These must be defined before they can be used in `providesTags` or `invalidatesTags`.
+</Note>
+
+## Providing Tags (Queries)
+
+Use `providesTags` in queries to declare what data they contain:
+
+```typescript
+getPosts: build.query<Post[], void>({
+  query: () => ({ url: '/posts' }),
+  providesTags: ['Posts'],  // Simple: All posts
+}),
+```
+
+### Static Tags
+
+Provide a fixed array of tags:
+
+```typescript
+getPosts: build.query<Post[], void>({
+  query: () => '/posts',
+  providesTags: ['Posts'],
+}),
+```
+
+### Dynamic Tags with IDs
+
+Provide tags based on the response data:
+
+```typescript
+getPosts: build.query<Post[], void>({
+  query: () => '/posts',
+  providesTags: (result) =>
+    result
+      ? [
+          // Individual post tags
+          ...result.map(({ id }) => ({ type: 'Posts', id } as const)),
+          // List tag
+          { type: 'Posts', id: 'LIST' },
+        ]
+      : [{ type: 'Posts', id: 'LIST' }],
+}),
+```
+
+<Tip>
+Use a `LIST` tag for the collection itself and individual ID tags for specific items. This allows fine-grained invalidation.
+</Tip>
+
+### Tag Function Signature
+
+```typescript
+providesTags: (
+  result: ResultType | undefined,
+  error: FetchBaseQueryError | SerializedError | undefined,
+  arg: QueryArg
+) => TagDescription[] | TagDescription
+```
+
+## Invalidating Tags (Mutations)
+
+Use `invalidatesTags` in mutations to declare what data they affect:
+
+```typescript
+addPost: build.mutation<Post, Partial<Post>>({
+  query: (body) => ({
+    url: '/posts',
+    method: 'POST',
+    body,
+  }),
+  invalidatesTags: [{ type: 'Posts', id: 'LIST' }],  // Refetch post lists
+}),
+```
+
+### Static Invalidation
+
+Invalidate fixed tags:
+
+```typescript
+addPost: build.mutation<Post, Partial<Post>>({
+  query: (body) => ({ url: '/posts', method: 'POST', body }),
+  invalidatesTags: ['Posts'],  // Invalidate all Posts tags
+}),
+```
+
+### Dynamic Invalidation
+
+Invalidate tags based on the mutation result or arguments:
+
+```typescript
+updatePost: build.mutation<Post, Partial<Post>>({
+  query: ({ id, ...body }) => ({
+    url: `/posts/${id}`,
+    method: 'PUT',
+    body,
+  }),
+  // Invalidate the specific post that was updated
+  invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+}),
+```
+
+### Tag Invalidation Function Signature
+
+```typescript
+invalidatesTags: (
+  result: ResultType | undefined,
+  error: FetchBaseQueryError | SerializedError | undefined,
+  arg: MutationArg
+) => TagDescription[] | TagDescription
+```
+
+## Tag Description Types
+
+Tags can be described in multiple formats:
+
+<Tabs>
+  <Tab title="String">
+    Simple string tag type:
+
+    ```typescript
+    providesTags: ['Posts']
+    invalidatesTags: ['Posts']
+    ```
+  </Tab>
+  <Tab title="Object with ID">
+    Tag with specific ID:
+
+    ```typescript
+    providesTags: [{ type: 'Posts', id: 1 }]
+    invalidatesTags: [{ type: 'Posts', id: 1 }]
+    ```
+  </Tab>
+  <Tab title="Object with String ID">
+    Tag with string ID (useful for 'LIST', 'ALL', etc.):
+
+    ```typescript
+    providesTags: [{ type: 'Posts', id: 'LIST' }]
+    invalidatesTags: [{ type: 'Posts', id: 'LIST' }]
+    ```
+  </Tab>
+  <Tab title="Mixed">
+    Array of mixed tag descriptions:
+
+    ```typescript
+    providesTags: [
+      'Posts',
+      { type: 'Posts', id: 1 },
+      { type: 'Posts', id: 'LIST' },
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+## Common Patterns
+
+### List + Detail Pattern
+
+Invalidate lists when adding items, and specific items when updating:
+
+```typescript
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    // List query - provides LIST tag and individual item tags
+    getPosts: build.query<Post[], void>({
+      query: () => '/posts',
+      providesTags: (result) =>
+        result
+          ? [
+              ...result.map(({ id }) => ({ type: 'Posts', id } as const)),
+              { type: 'Posts', id: 'LIST' },
+            ]
+          : [{ type: 'Posts', id: 'LIST' }],
+    }),
+    
+    // Detail query - provides specific item tag
+    getPost: build.query<Post, number>({
+      query: (id) => `/posts/${id}`,
+      providesTags: (result, error, id) => [{ type: 'Posts', id }],
+    }),
+    
+    // Add mutation - invalidates LIST (refetches list queries)
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({ url: '/posts', method: 'POST', body }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+    
+    // Update mutation - invalidates specific item (refetches that item)
+    updatePost: build.mutation<Post, Partial<Post>>({
+      query: ({ id, ...body }) => ({
+        url: `/posts/${id}`,
+        method: 'PUT',
+        body,
+      }),
+      invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+    }),
+    
+    // Delete mutation - invalidates LIST (refetches list queries)
+    deletePost: build.mutation<{ success: boolean; id: number }, number>({
+      query: (id) => ({ url: `/posts/${id}`, method: 'DELETE' }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+  }),
+});
+```
+
+### Multiple Tag Types
+
+Use multiple tag types for complex data relationships:
+
+```typescript
+export const api = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts', 'Users', 'Comments'],
+  endpoints: (build) => ({
+    getPost: build.query<Post, number>({
+      query: (id) => `/posts/${id}`,
+      providesTags: (result, error, id) => [
+        { type: 'Posts', id },
+        { type: 'Comments', id: 'LIST' },  // Post includes comments
+      ],
+    }),
+    
+    addComment: build.mutation<Comment, { postId: number; text: string }>({
+      query: ({ postId, text }) => ({
+        url: `/posts/${postId}/comments`,
+        method: 'POST',
+        body: { text },
+      }),
+      // Invalidate comments list for this post
+      invalidatesTags: (result, error, { postId }) => [
+        { type: 'Comments', id: 'LIST' },
+        { type: 'Posts', id: postId },  // Also refetch the post
+      ],
+    }),
+  }),
+});
+```
+
+### Conditional Invalidation
+
+Invalidate tags only under certain conditions:
+
+```typescript
+updatePost: build.mutation<Post, Partial<Post>>({
+  query: ({ id, ...body }) => ({
+    url: `/posts/${id}`,
+    method: 'PUT',
+    body,
+  }),
+  invalidatesTags: (result, error, { id }) => {
+    // Only invalidate if the mutation succeeded
+    if (error) return [];
+    
+    return [
+      { type: 'Posts', id },
+      { type: 'Posts', id: 'LIST' },
+    ];
+  },
+}),
+```
+
+## Complete Example
+
+Here's a complete example showing cache invalidation in action:
+
+```typescript
+// api.ts
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+export interface Post {
+  id: number;
+  name: string;
+  fetched_at: string;
+}
+
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://api.localhost.com' }),
+  tagTypes: ['Posts'],
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({
+      query: () => ({ url: '/posts' }),
+      providesTags: (result) =>
+        result
+          ? [...result.map(({ id }) => ({ type: 'Posts', id }) as const), { type: 'Posts', id: 'LIST' }]
+          : [{ type: 'Posts', id: 'LIST' }],
+    }),
+    getPost: build.query<Post, number>({
+      query: (id) => `/posts/${id}`,
+      providesTags: (result, error, id) => [{ type: 'Posts', id }],
+    }),
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({
+        url: `/posts`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+    updatePost: build.mutation<Post, Partial<Post>>({
+      query: (data) => {
+        const { id, ...body } = data;
+        return {
+          url: `/posts/${id}`,
+          method: 'PUT',
+          body,
+        };
+      },
+      invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+    }),
+    deletePost: build.mutation<{ success: boolean; id: number }, number>({
+      query: (id) => ({
+        url: `/posts/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+    }),
+  }),
+});
+
+export const { useGetPostQuery, useGetPostsQuery, useAddPostMutation, useDeletePostMutation, useUpdatePostMutation } =
+  postsApi;
+```
+
+```typescript
+// posts-list.component.ts
+import { Component, signal } from '@angular/core';
+import { useGetPostsQuery, useAddPostMutation } from './api';
+
+@Component({
+  selector: 'app-posts-list',
+  standalone: true,
+  template: `
+    <input 
+      type="text" 
+      [value]="postName()" 
+      (input)="postName.set($any($event.target).value)" />
+    
+    <button 
+      [disabled]="!postName() || addPost.isLoading()"
+      (click)="addNewPost()">
+      {{ addPost.isLoading() ? 'Adding...' : 'Add Post' }}
+    </button>
+    
+    @if (postsQuery.data(); as posts) {
+      @for (post of posts; track post.id) {
+        <li>{{ post.name }}</li>
+      }
+    }
+  `,
+})
+export class PostsListComponent {
+  // This query will automatically refetch when addPost() succeeds
+  postsQuery = useGetPostsQuery();
+  addPost = useAddPostMutation();
+  
+  postName = signal('');
+  
+  addNewPost() {
+    this.addPost({ name: this.postName() })
+      .unwrap()
+      .then(() => {
+        this.postName.set('');
+        // No manual refetch needed! postsQuery auto-refetches due to tag invalidation
+      });
+  }
+}
+```
+
+<Tip>
+Notice how we don't need to manually call `postsQuery.refetch()`. The tag system handles refetching automatically.
+</Tip>
+
+## Manual Cache Invalidation
+
+Sometimes you need to invalidate cache manually without a mutation:
+
+```typescript
+import { inject } from '@angular/core';
+import { Store } from '@ngrx/store';
+import { postsApi } from './api';
+
+export class MyComponent {
+  #store = inject(Store);
+  
+  invalidateAllPosts() {
+    this.#store.dispatch(
+      postsApi.util.invalidateTags([{ type: 'Posts', id: 'LIST' }])
+    );
+  }
+  
+  invalidateSpecificPost(id: number) {
+    this.#store.dispatch(
+      postsApi.util.invalidateTags([{ type: 'Posts', id }])
+    );
+  }
+}
+```
+
+## TypeScript Type Signatures
+
+### Tag Description Types
+
+```typescript
+type TagDescription<TagType extends string = string> =
+  | TagType
+  | { type: TagType; id?: string | number };
+
+type ProvidesTags<ResultType, QueryArg, TagType extends string> =
+  | TagDescription<TagType>[]
+  | TagDescription<TagType>
+  | ((result: ResultType | undefined, error: FetchBaseQueryError | SerializedError | undefined, arg: QueryArg) =>
+      TagDescription<TagType>[] | TagDescription<TagType>);
+
+type InvalidatesTags<ResultType, QueryArg, TagType extends string> =
+  | TagDescription<TagType>[]
+  | TagDescription<TagType>
+  | ((result: ResultType | undefined, error: FetchBaseQueryError | SerializedError | undefined, arg: QueryArg) =>
+      TagDescription<TagType>[] | TagDescription<TagType>);
+```
+
+## Best Practices
+
+<CodeGroup>
+```typescript Use LIST + Individual ID Tags
+// ✅ Good - Enables fine-grained invalidation
+getPosts: build.query<Post[], void>({
+  query: () => '/posts',
+  providesTags: (result) =>
+    result
+      ? [
+          ...result.map(({ id }) => ({ type: 'Posts', id }) as const),
+          { type: 'Posts', id: 'LIST' },
+        ]
+      : [{ type: 'Posts', id: 'LIST' }],
+}),
+```
+
+```typescript Invalidate LIST on Create/Delete
+// ✅ Good - Refetch lists when items are added or removed
+addPost: build.mutation<Post, Partial<Post>>({
+  query: (body) => ({ url: '/posts', method: 'POST', body }),
+  invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+}),
+
+deletePost: build.mutation<void, number>({
+  query: (id) => ({ url: `/posts/${id}`, method: 'DELETE' }),
+  invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+}),
+```
+
+```typescript Invalidate Specific IDs on Update
+// ✅ Good - Only refetch the updated item
+updatePost: build.mutation<Post, Partial<Post>>({
+  query: ({ id, ...body }) => ({ url: `/posts/${id}`, method: 'PUT', body }),
+  invalidatesTags: (result, error, { id }) => [{ type: 'Posts', id }],
+}),
+```
+
+```typescript Use as const for Type Safety
+// ✅ Good - TypeScript will infer the correct types
+providesTags: (result) =>
+  result
+    ? result.map(({ id }) => ({ type: 'Posts', id } as const))
+    : [],
+```
+</CodeGroup>
+
+## Related Concepts
+
+- [Queries](/concepts/queries) - Fetch and cache data
+- [Mutations](/concepts/mutations) - Modify server data
+- [Error Handling](/guides/error-handling) - Error handling and recovery patterns

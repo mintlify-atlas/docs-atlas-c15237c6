@@ -1,0 +1,264 @@
+---
+title: Query Types
+description: TypeScript types for query hooks and their results in ngrx-rtk-query
+---
+
+## Query Hook Types
+
+### UseQuery
+
+The main query hook type that automatically triggers fetches and subscribes to cached data.
+
+```typescript
+type UseQuery<D extends QueryDefinition<any, any, any, any>> = <
+  R extends Record<string, any> = UseQueryStateDefaultResult<D>,
+>(
+  arg: Signal<QueryArgFrom<D> | SkipToken> | (() => QueryArgFrom<D> | SkipToken) | QueryArgFrom<D> | SkipToken,
+  options?: UseQueryOptions<D, R> | Signal<UseQueryOptions<D, R>> | (() => UseQueryOptions<D, R>),
+) => UseQueryHookResult<D, R>;
+```
+
+**Features:**
+- Automatically triggers requests to retrieve data
+- Subscribes component to keep cached data in the store
+- Accepts polling/re-fetching options
+- Returns the latest request status and cached data
+- Re-renders as the request status changes
+
+**Example:**
+```typescript
+export class PostsComponent {
+  postsQuery = useGetPostsQuery();
+  postQuery = useGetPostQuery(this.postId, {
+    pollingInterval: 5000,
+    skip: this.skipQuery()
+  });
+}
+```
+
+### TypedUseQuery
+
+Helper type for creating strongly-typed query hooks.
+
+```typescript
+type TypedUseQuery<ResultType, QueryArg, BaseQuery extends BaseQueryFn> = UseQuery<
+  QueryDefinition<QueryArg, BaseQuery, string, ResultType, string>
+>;
+```
+
+### UseLazyQuery
+
+Query hook type with manual control over when data fetching occurs.
+
+```typescript
+type UseLazyQuery<D extends QueryDefinition<any, any, any, any>> = <
+  R extends Record<string, any> = UseQueryStateDefaultResult<D>,
+>(
+  options?: UseLazyQueryOptions<D, R> | Signal<UseLazyQueryOptions<D, R>> | (() => UseLazyQueryOptions<D, R>),
+) => LazyQueryTrigger<D> & UseLazyQueryStateResult<D, R> & UseLazyQueryLastPromiseInfo<D>;
+```
+
+**Features:**
+- Manual control over firing requests
+- Returns trigger function to initiate requests
+- Subscribes component to cached data
+- Accepts polling/re-fetching options after manual trigger
+
+**Example:**
+```typescript
+export class SearchComponent {
+  searchQuery = useLazyGetPostsQuery();
+
+  onSearch(term: string) {
+    this.searchQuery(term).unwrap()
+      .then(results => console.log('Results:', results))
+      .catch(error => console.error('Error:', error));
+  }
+}
+```
+
+### UseQuerySubscription
+
+Query hook type that only handles subscriptions without returning state.
+
+```typescript
+type UseQuerySubscription<D extends QueryDefinition<any, any, any, any>> = (
+  arg: Signal<QueryArgFrom<D> | SkipToken> | (() => QueryArgFrom<D> | SkipToken) | QueryArgFrom<D> | SkipToken,
+  options?: UseQuerySubscriptionOptions | Signal<UseQuerySubscriptionOptions> | (() => UseQuerySubscriptionOptions),
+) => UseQuerySubscriptionResult<D>;
+```
+
+**Features:**
+- Automatically triggers requests
+- Subscribes component to keep cached data in store
+- Does not return request status or cached data
+- Use with `useQueryState` for complete functionality
+
+### UseQueryState
+
+Query hook type that only reads cached data without triggering fetches.
+
+```typescript
+type UseQueryState<D extends QueryDefinition<any, any, any, any>> = <
+  R extends Record<string, any> = UseQueryStateDefaultResult<D>,
+>(
+  arg: Signal<QueryArgFrom<D> | SkipToken> | (() => QueryArgFrom<D> | SkipToken) | QueryArgFrom<D> | SkipToken,
+  options?: UseQueryStateOptions<D, R> | Signal<UseQueryStateOptions<D, R>> | (() => UseQueryStateOptions<D, R>),
+) => UseQueryStateResult<D, R>;
+```
+
+**Features:**
+- Reads request status and cached data from store
+- Does not trigger new fetches
+- Re-renders as data becomes available
+- Use with `useQuerySubscription` for complete functionality
+
+## Query Options Types
+
+### UseQueryOptions
+
+Options for configuring query behavior.
+
+```typescript
+type UseQueryOptions<
+  D extends QueryDefinition<any, any, any, any>,
+  R extends Record<string, any> = UseQueryStateDefaultResult<D>,
+> = UseQuerySubscriptionOptions & UseQueryStateOptions<D, R>;
+```
+
+<ResponseField name="skip" type="boolean" default="false">
+Prevents a query from automatically running. When true, the query will have a status of `uninitialized`.
+</ResponseField>
+
+<ResponseField name="refetchOnMountOrArgChange" type="boolean | number" default="false">
+Controls whether to refetch when a new subscriber is added:
+- `false` - Only fetch if data doesn't exist
+- `true` - Always refetch when subscriber added
+- `number` - Refetch if specified seconds have elapsed since last fulfilled
+</ResponseField>
+
+<ResponseField name="selectFromResult" type="(state) => R">
+Allows extracting specific segments from query results for performant rendering. Component only re-renders when selected data changes.
+</ResponseField>
+
+<ResponseField name="pollingInterval" type="number">
+Polling interval in milliseconds. Set to 0 to disable polling.
+</ResponseField>
+
+<ResponseField name="refetchOnReconnect" type="boolean" default="false">
+Enables refetching when browser regains network connection.
+</ResponseField>
+
+<ResponseField name="refetchOnFocus" type="boolean" default="false">
+Enables refetching when browser window regains focus.
+</ResponseField>
+
+**Example with selectFromResult:**
+```typescript
+post = api.useGetPostsQuery(undefined, {
+  selectFromResult: ({ data }) => ({ 
+    post: data?.find((post) => post.id === id) 
+  }),
+});
+```
+
+### TypedUseQueryStateOptions
+
+Helper type for creating strongly-typed query options.
+
+```typescript
+type TypedUseQueryStateOptions<
+  ResultType,
+  QueryArg,
+  BaseQuery extends BaseQueryFn,
+  SelectedResult extends Record<string, any> = UseQueryStateDefaultResult<...>
+> = UseQueryStateOptions<QueryDefinition<...>, SelectedResult>;
+```
+
+**Example:**
+```typescript
+type Options = TypedUseQueryStateOptions<
+  Post[],
+  void,
+  ReturnType<typeof fetchBaseQuery>,
+  { post: Post | undefined }
+>;
+
+const options: Options = {
+  selectFromResult: ({ data }) => ({ post: data?.[0] })
+};
+```
+
+### QueryStateSelector
+
+Function type for selecting specific data from query results.
+
+```typescript
+type QueryStateSelector<
+  R extends Record<string, any>,
+  D extends QueryDefinition<any, any, any, any>
+> = (state: UseQueryStateDefaultResult<D>) => R;
+```
+
+### TypedQueryStateSelector
+
+Helper type for creating strongly-typed selectors.
+
+```typescript
+type TypedQueryStateSelector<
+  ResultType,
+  QueryArgumentType,
+  BaseQueryFunctionType extends BaseQueryFn,
+  SelectedResultType extends Record<string, any> = ...
+> = QueryStateSelector<SelectedResultType, QueryDefinition<...>>;
+```
+
+**Example:**
+```typescript
+const typedSelectFromResult: TypedQueryStateSelector<
+  PostsApiResponse,
+  number | undefined,
+  ReturnType<typeof fetchBaseQuery>,
+  { posts: Post[] }
+> = (state) => ({ posts: state.data?.posts ?? [] });
+
+getPostsQuery = useGetPostsQuery(undefined, {
+  selectFromResult: typedSelectFromResult,
+});
+```
+
+## Trigger Types
+
+### LazyQueryTrigger
+
+Function type for triggering lazy queries.
+
+```typescript
+type LazyQueryTrigger<D extends QueryDefinition<any, any, any, any>> = {
+  (arg: QueryArgFrom<D>, extra?: { preferCacheValue?: boolean }): QueryActionCreatorResult<D>;
+};
+```
+
+**Parameters:**
+- `arg` - Query argument
+- `extra.preferCacheValue` - If true, uses cache value if available instead of fetching
+
+**Returns:** Promise-like object with `.unwrap()` method
+
+**Example:**
+```typescript
+// Start new request (default)
+await searchQuery(term).unwrap();
+
+// Use cache if available
+await searchQuery(term, { preferCacheValue: true }).unwrap();
+```
+
+### TypedLazyQueryTrigger
+
+Helper type for creating strongly-typed lazy query triggers.
+
+```typescript
+type TypedLazyQueryTrigger<ResultType, QueryArg, BaseQuery extends BaseQueryFn> = 
+  LazyQueryTrigger<QueryDefinition<QueryArg, BaseQuery, string, ResultType, string>>;
+```

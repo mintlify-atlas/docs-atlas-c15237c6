@@ -1,0 +1,320 @@
+---
+title: fetchBaseQuery
+description: Angular-compatible base query function for HTTP requests with dependency injection support
+---
+
+`fetchBaseQuery` is a wrapper around RTK Query's fetch-based request handler that adds support for Angular's dependency injection system. It can be used with configuration objects or factory functions that access Angular services.
+
+## Function Signatures
+
+```typescript
+// Configuration object signature
+function fetchBaseQuery(
+  queryArgs?: FetchBaseQueryArgs
+): BaseQueryFn
+
+// Factory function signature  
+function fetchBaseQuery(
+  factory: () => BaseQueryFn
+): BaseQueryFn
+```
+
+## Parameters
+
+### Configuration Object
+
+<ParamField path="queryArgs" type="FetchBaseQueryArgs">
+  Configuration object for the base query
+
+  <Expandable title="properties">
+    <ParamField path="baseUrl" type="string">
+      The base URL for all requests. Will be prepended to all endpoint paths.
+    </ParamField>
+
+    <ParamField path="prepareHeaders" type="(headers: Headers, api: FetchBaseQueryApi) => Headers | Promise<Headers>">
+      A function to modify headers before each request. Useful for adding authentication tokens.
+    </ParamField>
+
+    <ParamField path="fetchFn" type="typeof fetch">
+      Custom fetch implementation. Defaults to global `fetch`.
+    </ParamField>
+
+    <ParamField path="timeout" type="number">
+      Request timeout in milliseconds.
+    </ParamField>
+
+    <ParamField path="credentials" type="'omit' | 'same-origin' | 'include'">
+      Controls whether cookies are sent with requests.
+    </ParamField>
+
+    <ParamField path="mode" type="'cors' | 'no-cors' | 'same-origin'">
+      The request mode.
+    </ParamField>
+
+    <ParamField path="responseHandler" type="'json' | 'text' | ((response: Response) => Promise<any>)" default="'json'">
+      How to parse the response body.
+    </ParamField>
+
+    <ParamField path="validateStatus" type="(response: Response, body: any) => boolean">
+      Custom function to determine if a response should be considered an error.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Factory Function
+
+<ParamField path="factory" type="() => BaseQueryFn" required>
+  A factory function that runs within Angular's injection context and returns a base query function. This allows you to inject Angular services like `HttpClient`.
+
+  The factory function is executed using `runInInjectionContext` with access to the current `Injector`.
+</ParamField>
+
+## Return Value
+
+<ResponseField name="BaseQueryFn" type="function">
+  A base query function that handles HTTP requests for RTK Query endpoints.
+
+  The function receives:
+  - `args`: Request arguments (URL, method, body, etc.)
+  - `api`: RTK Query API object with utilities
+  - `extraOptions`: Additional options passed to the request
+
+  Returns a promise that resolves to either:
+  - `{ data: any }` on success
+  - `{ error: { status: number, data: any } }` on error
+</ResponseField>
+
+## Usage Examples
+
+### Basic Usage with Configuration Object
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+export const api = createApi({
+  baseQuery: fetchBaseQuery({ 
+    baseUrl: 'https://api.example.com',
+  }),
+  endpoints: (build) => ({
+    getPosts: build.query({
+      query: () => '/posts',
+    }),
+  }),
+});
+```
+
+### With Authentication Headers
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+export const api = createApi({
+  baseQuery: fetchBaseQuery({
+    baseUrl: 'https://api.example.com',
+    prepareHeaders: (headers, { getState }) => {
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+      headers.set('Content-Type', 'application/json');
+      return headers;
+    },
+  }),
+  endpoints: (build) => ({
+    getProfile: build.query({
+      query: () => '/profile',
+    }),
+  }),
+});
+```
+
+### Using Factory Function with Angular HttpClient
+
+The factory function pattern allows you to inject Angular services:
+
+```typescript
+import { inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+import { firstValueFrom } from 'rxjs';
+
+export const api = createApi({
+  baseQuery: fetchBaseQuery(() => {
+    const http = inject(HttpClient);
+    
+    return async (args, api, extraOptions) => {
+      const { url, method = 'GET', body, params } = typeof args === 'string' 
+        ? { url: args, method: 'GET' } 
+        : args;
+
+      try {
+        const fullUrl = `https://api.example.com${url}`;
+        const data = await firstValueFrom(
+          http.request(method, fullUrl, { body, params })
+        );
+        return { data };
+      } catch (error: any) {
+        return {
+          error: {
+            status: error.status || 500,
+            data: error.error || error.message,
+          },
+        };
+      }
+    };
+  }),
+  endpoints: (build) => ({
+    getPosts: build.query({
+      query: () => ({ url: '/posts' }),
+    }),
+  }),
+});
+```
+
+### Using Factory Function with Custom Auth Service
+
+```typescript
+import { inject } from '@angular/core';
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+import { AuthService } from './auth.service';
+
+export const api = createApi({
+  baseQuery: fetchBaseQuery(() => {
+    const authService = inject(AuthService);
+    
+    return async (args, api, extraOptions) => {
+      const token = await authService.getToken();
+      
+      const headers = new Headers();
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+
+      const { url, ...init } = typeof args === 'string' 
+        ? { url: args } 
+        : args;
+
+      const response = await fetch(`https://api.example.com${url}`, {
+        ...init,
+        headers,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { error: { status: response.status, data } };
+      }
+
+      return { data };
+    };
+  }),
+  endpoints: (build) => ({
+    getUserProfile: build.query({
+      query: () => '/user/profile',
+    }),
+  }),
+});
+```
+
+### With Custom Error Handling
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+export const api = createApi({
+  baseQuery: fetchBaseQuery({
+    baseUrl: 'https://api.example.com',
+    validateStatus: (response, body) => {
+      // Treat any 2xx status as success
+      return response.status >= 200 && response.status < 300;
+    },
+    responseHandler: async (response) => {
+      // Custom response parsing
+      const text = await response.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    },
+  }),
+  endpoints: (build) => ({
+    getData: build.query({
+      query: () => '/data',
+    }),
+  }),
+});
+```
+
+### With Request Timeout
+
+```typescript
+import { createApi, fetchBaseQuery } from 'ngrx-rtk-query';
+
+export const api = createApi({
+  baseQuery: fetchBaseQuery({
+    baseUrl: 'https://api.example.com',
+    timeout: 10000, // 10 second timeout
+  }),
+  endpoints: (build) => ({
+    getSlowData: build.query({
+      query: () => '/slow-endpoint',
+    }),
+  }),
+});
+```
+
+## Implementation Details
+
+The `fetchBaseQuery` function has two execution modes:
+
+### Configuration Object Mode
+
+When passed a configuration object, it directly calls RTK Query's `fetchBaseQuery`:
+
+```typescript
+if (typeof paramsOrFactory === 'object') {
+  return fetchBaseQueryDefault(paramsOrFactory as FetchBaseQueryArgs);
+}
+```
+
+### Factory Function Mode
+
+When passed a factory function, it returns an async function that:
+
+1. Extracts the Angular `Injector` from the API's extra context
+2. Runs the factory function within the injection context using `runInInjectionContext`
+3. Executes the resulting base query with the provided arguments
+
+```typescript
+return async (args, api, extraOptions) => {
+  const injector = (api.extra as any).injector as Injector;
+  const baseQuery = runInInjectionContext(injector, paramsOrFactory);
+  return await baseQuery(args, api, extraOptions);
+};
+```
+
+This pattern enables Angular services to be injected within the factory function.
+
+## When to Use Each Approach
+
+### Use Configuration Object When:
+- You have simple authentication requirements (static tokens, localStorage)
+- You don't need Angular-specific services
+- You want to use standard fetch API with minimal configuration
+
+### Use Factory Function When:
+- You need to inject Angular services (HttpClient, custom auth services)
+- You have complex authentication flows (token refresh, multi-factor auth)
+- You want to leverage Angular's HTTP interceptors
+- You need access to Angular's dependency injection system
+
+## Source Reference
+
+Source: [`packages/ngrx-rtk-query/core/src/fetch-base-query.ts:6-17`](https://github.com/SaulMoro/ngrx-rtk-query/blob/main/packages/ngrx-rtk-query/core/src/fetch-base-query.ts#L6)
+
+## See Also
+
+- [createApi](/api/create-api) - Main API creation function
+- [Angular HttpClient](https://angular.dev/guide/http) - Angular's HTTP client
+- [RTK Query fetchBaseQuery](https://redux-toolkit.js.org/rtk-query/api/fetchBaseQuery) - Original RTK Query documentation

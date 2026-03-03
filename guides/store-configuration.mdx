@@ -1,0 +1,401 @@
+---
+title: Store Configuration
+description: Learn how to configure ngrx-rtk-query with NgRx Store or standalone mode
+---
+
+## Overview
+
+ngrx-rtk-query provides two store configuration options:
+
+- **`provideStoreApi`**: Full NgRx Store integration with Redux DevTools support
+- **`provideNoopStoreApi`**: Lightweight standalone mode without NgRx dependency
+
+Choose the right provider based on your application's architecture and requirements.
+
+## provideStoreApi (NgRx Store)
+
+Use `provideStoreApi` when your application already uses NgRx Store or you want full Redux DevTools integration.
+
+### When to Use
+
+- Your application already uses `@ngrx/store`
+- You want Redux DevTools for debugging
+- You need to integrate with existing NgRx state management
+- You want to combine RTK Query with NgRx actions and effects
+
+### Installation
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    npm install ngrx-rtk-query @reduxjs/toolkit @ngrx/store
+    ```
+  </Step>
+
+  <Step title="Configure providers">
+    Add the store providers to your application configuration:
+
+    ```typescript app.config.ts
+    import { ApplicationConfig, isDevMode } from '@angular/core';
+    import { provideStore } from '@ngrx/store';
+    import { provideStoreDevtools } from '@ngrx/store-devtools';
+    import { provideStoreApi } from 'ngrx-rtk-query';
+    import { postsApi } from './posts/api';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideStore(),
+        provideStoreDevtools({
+          name: 'RTK Query App',
+          logOnly: !isDevMode(),
+        }),
+        provideStoreApi(postsApi),
+      ],
+    };
+    ```
+  </Step>
+
+  <Step title="Use in components">
+    ```typescript
+    import { useGetPostsQuery } from './posts/api';
+
+    @Component({
+      template: `
+        @if (postsQuery.isLoading()) {
+          <p>Loading...</p>
+        }
+        @if (postsQuery.data(); as posts) {
+          @for (post of posts; track post.id) {
+            <div>{{ post.name }}</div>
+          }
+        }
+      `,
+    })
+    export class PostsComponent {
+      postsQuery = useGetPostsQuery();
+    }
+    ```
+  </Step>
+</Steps>
+
+### Configuration Options
+
+```typescript
+provideStoreApi(api, options);
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `setupListeners` | `boolean \| SetupListenersOptions` | `true` | Configure automatic refetching behavior |
+
+<Note>
+  The `setupListeners` option controls automatic refetch on focus and reconnect events. Set to `false` to disable.
+</Note>
+
+### Redux DevTools Integration
+
+With `provideStoreApi`, your RTK Query state is visible in Redux DevTools:
+
+- View cached query data under the `reducerPath` key
+- Track query lifecycle actions
+- Time-travel debugging
+- Action history
+
+## provideNoopStoreApi (Standalone)
+
+Use `provideNoopStoreApi` for a lightweight implementation without NgRx Store dependency.
+
+### When to Use
+
+- You don't want to add NgRx Store as a dependency
+- Building a new application without existing NgRx state
+- You want minimal bundle size
+- Redux DevTools are not required
+
+### Installation
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    npm install ngrx-rtk-query @reduxjs/toolkit
+    ```
+
+    <Note>
+      No `@ngrx/store` dependency required!
+    </Note>
+  </Step>
+
+  <Step title="Configure providers">
+    ```typescript app.config.ts
+    import { ApplicationConfig } from '@angular/core';
+    import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+    import { postsApi } from './posts/api';
+
+    export const appConfig: ApplicationConfig = {
+      providers: [
+        provideNoopStoreApi(postsApi),
+      ],
+    };
+    ```
+  </Step>
+
+  <Step title="Use in components">
+    The component code is identical to the NgRx Store version:
+
+    ```typescript
+    import { useGetPostsQuery } from './posts/api';
+
+    @Component({
+      template: `
+        @if (postsQuery.isLoading()) {
+          <p>Loading...</p>
+        }
+        @if (postsQuery.data(); as posts) {
+          @for (post of posts; track post.id) {
+            <div>{{ post.name }}</div>
+          }
+        }
+      `,
+    })
+    export class PostsComponent {
+      postsQuery = useGetPostsQuery();
+    }
+    ```
+  </Step>
+</Steps>
+
+### Configuration Options
+
+```typescript
+provideNoopStoreApi(api, options);
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `setupListeners` | `boolean \| SetupListenersOptions` | `true` | Configure automatic refetching behavior |
+
+### Internal Implementation
+
+The noop store uses Angular signals internally:
+
+- Lightweight signal-based state management
+- No Redux store overhead
+- Same API surface as NgRx Store version
+- Full reactivity with fine-grained change detection
+
+## Comparison
+
+<Tabs>
+  <Tab title="Feature Comparison">
+    | Feature | provideStoreApi | provideNoopStoreApi |
+    |---------|----------------|---------------------|
+    | Redux DevTools | ✅ Yes | ❌ No |
+    | Bundle Size | Larger (+@ngrx/store) | Smaller |
+    | Dependencies | @ngrx/store required | No @ngrx/store |
+    | Integration | Works with NgRx ecosystem | Standalone |
+    | API Surface | Identical | Identical |
+    | Performance | Excellent | Excellent |
+  </Tab>
+
+  <Tab title="Code Comparison">
+    <CodeGroup>
+      ```typescript NgRx Store
+      import { provideStore } from '@ngrx/store';
+      import { provideStoreDevtools } from '@ngrx/store-devtools';
+      import { provideStoreApi } from 'ngrx-rtk-query';
+      import { postsApi } from './api';
+
+      export const appConfig: ApplicationConfig = {
+        providers: [
+          provideStore(),
+          provideStoreDevtools({ name: 'App' }),
+          provideStoreApi(postsApi),
+        ],
+      };
+      ```
+
+      ```typescript Standalone
+      import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+      import { postsApi } from './api';
+
+      export const appConfig: ApplicationConfig = {
+        providers: [
+          provideNoopStoreApi(postsApi),
+        ],
+      };
+      ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## Multiple APIs
+
+You can register multiple APIs with either provider:
+
+<CodeGroup>
+  ```typescript NgRx Store
+  import { provideStoreApi } from 'ngrx-rtk-query';
+  import { postsApi } from './posts/api';
+  import { usersApi } from './users/api';
+
+  export const appConfig: ApplicationConfig = {
+    providers: [
+      provideStore(),
+      provideStoreApi(postsApi),
+      provideStoreApi(usersApi),
+    ],
+  };
+  ```
+
+  ```typescript Standalone
+  import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+  import { postsApi } from './posts/api';
+  import { usersApi } from './users/api';
+
+  export const appConfig: ApplicationConfig = {
+    providers: [
+      provideNoopStoreApi(postsApi),
+      provideNoopStoreApi(usersApi),
+    ],
+  };
+  ```
+</CodeGroup>
+
+<Note>
+  Each API must have a unique `reducerPath` to avoid conflicts.
+</Note>
+
+## Setup Listeners
+
+Both providers support the `setupListeners` option:
+
+```typescript
+// Disable automatic refetch on focus/reconnect
+provideStoreApi(postsApi, { setupListeners: false });
+
+// Or with custom options
+provideStoreApi(postsApi, {
+  setupListeners: {
+    onFocus: () => true,
+    onReconnect: () => true,
+    onOnline: () => false,
+  },
+});
+```
+
+<Warning>
+  When `setupListeners` is disabled, queries won't automatically refetch when the window regains focus or network reconnects.
+</Warning>
+
+## Migration Guide
+
+### From NgRx Store to Standalone
+
+<Steps>
+  <Step title="Update imports">
+    ```typescript
+    // Before
+    import { provideStoreApi } from 'ngrx-rtk-query';
+
+    // After
+    import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+    ```
+  </Step>
+
+  <Step title="Remove NgRx providers">
+    ```typescript
+    // Before
+    providers: [
+      provideStore(),
+      provideStoreDevtools({ name: 'App' }),
+      provideStoreApi(postsApi),
+    ]
+
+    // After
+    providers: [
+      provideNoopStoreApi(postsApi),
+    ]
+    ```
+  </Step>
+
+  <Step title="Uninstall NgRx (optional)">
+    ```bash
+    npm uninstall @ngrx/store @ngrx/store-devtools
+    ```
+  </Step>
+</Steps>
+
+### From Standalone to NgRx Store
+
+<Steps>
+  <Step title="Install NgRx">
+    ```bash
+    npm install @ngrx/store @ngrx/store-devtools
+    ```
+  </Step>
+
+  <Step title="Update imports">
+    ```typescript
+    // Before
+    import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+
+    // After
+    import { provideStoreApi } from 'ngrx-rtk-query';
+    ```
+  </Step>
+
+  <Step title="Add NgRx providers">
+    ```typescript
+    // Before
+    providers: [
+      provideNoopStoreApi(postsApi),
+    ]
+
+    // After
+    providers: [
+      provideStore(),
+      provideStoreDevtools({ name: 'App' }),
+      provideStoreApi(postsApi),
+    ]
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  Component code remains unchanged when migrating between store configurations!
+</Note>
+
+## Troubleshooting
+
+### Error: "Provide the Store is necessary"
+
+<Warning>
+  This error occurs when using `provideStoreApi` without `provideStore()`.
+</Warning>
+
+**Solution**: Add `provideStore()` before `provideStoreApi()`:
+
+```typescript
+providers: [
+  provideStore(), // Must come first
+  provideStoreApi(postsApi),
+];
+```
+
+### Missing DevTools
+
+If Redux DevTools don't show your state:
+
+1. Ensure `provideStoreDevtools()` is added
+2. Check that the browser extension is installed
+3. Verify `reducerPath` is unique for each API
+
+### Switching Between Providers
+
+The API surface is identical, so switching providers requires no component changes:
+
+```typescript
+// Both work with the same component code
+provideStoreApi(postsApi);
+provideNoopStoreApi(postsApi);
+```

@@ -1,0 +1,171 @@
+---
+title: provideStoreApi
+description: Configure RTK Query with NgRx Store integration for Angular applications.
+---
+
+`provideStoreApi` sets up RTK Query to work with NgRx Store. It registers the API reducer with the store, initializes the hooks system, and optionally configures automatic refetching listeners.
+
+## Usage
+
+### Basic Setup
+
+```typescript
+import { ApplicationConfig } from '@angular/core';
+import { provideStore } from '@ngrx/store';
+import { provideStoreApi } from 'ngrx-rtk-query';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideStore(),
+    provideStoreApi(postsApi),
+  ],
+};
+```
+
+### With Redux DevTools
+
+```typescript
+import { provideStore } from '@ngrx/store';
+import { provideStoreDevtools } from '@ngrx/store-devtools';
+import { provideStoreApi } from 'ngrx-rtk-query';
+import { postsApi } from './posts/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideStore(),
+    provideStoreDevtools({
+      name: 'RTK Query App',
+      logOnly: !isDevMode(),
+    }),
+    provideStoreApi(postsApi),
+  ],
+};
+```
+
+### Multiple APIs
+
+```typescript
+import { provideStoreApi } from 'ngrx-rtk-query';
+import { postsApi } from './posts/api';
+import { usersApi } from './users/api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideStore(),
+    provideStoreApi(postsApi),
+    provideStoreApi(usersApi),
+  ],
+};
+```
+
+## Function Signature
+
+```typescript
+function provideStoreApi(
+  api: Api<any, Record<string, any>, string, string, any>,
+  config?: StoreQueryConfig
+): EnvironmentProviders
+```
+
+## Parameters
+
+<ParamField path="api" type="Api" required>
+  The RTK Query API instance created with `createApi`. This defines your endpoints, base query, and cache behavior.
+</ParamField>
+
+<ParamField path="config" type="StoreQueryConfig">
+  Optional configuration object.
+
+  <Expandable title="properties">
+    <ParamField path="setupListeners" type="boolean | ListenerConfig">
+      Controls automatic refetching behavior. By default, RTK Query will automatically refetch queries when the window regains focus or when network connectivity is restored.
+
+      **Values:**
+      - `undefined` (default): Enable listeners with default behavior (refetch on focus/reconnect)
+      - `false`: Disable automatic refetching
+      - `{ onFocus, onReconnect, onOffline }`: Fine-grained control over listener behavior
+
+      **Example:**
+      ```typescript
+      // Disable automatic refetching
+      provideStoreApi(postsApi, { setupListeners: false })
+
+      // Enable only focus refetching
+      provideStoreApi(postsApi, {
+        setupListeners: { onFocus: true, onReconnect: false }
+      })
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Returns
+
+`EnvironmentProviders` - Angular environment providers that can be used in `ApplicationConfig` or route providers.
+
+## How It Works
+
+1. **Store Integration**: Registers the API's reducer with NgRx Store under `api.reducerPath` (defaults to `'api'`)
+2. **Hook System**: Creates Angular-compatible hooks (`useXxxQuery`, `useMutation`, etc.) that use signals and store selectors
+3. **Listeners**: Sets up automatic refetching on window focus and network reconnection (unless disabled)
+4. **Dispatch Bridge**: Connects RTK Query actions to NgRx Store's dispatch mechanism
+
+## When to Use
+
+Use `provideStoreApi` when:
+
+- Your application already uses NgRx Store
+- You want Redux DevTools integration for debugging
+- You need compatibility with other NgRx features (effects, router store, etc.)
+- You want a single state management solution across your app
+
+<Note>
+  **Prerequisites**: You must call `provideStore()` before `provideStoreApi()`. The NgRx Store must be available in the dependency injection tree.
+</Note>
+
+## Common Errors
+
+### "Provide the Store is necessary"
+
+```
+Error: Provide the Store is necessary to use the queries. Did you forget to provide the store?
+```
+
+**Solution**: Add `provideStore()` before `provideStoreApi()`:
+
+```typescript
+providers: [
+  provideStore(), // Must come first
+  provideStoreApi(postsApi),
+]
+```
+
+### "Middleware not added"
+
+If queries aren't working, ensure the API reducer is registered:
+
+```typescript
+// The reducer is automatically registered by provideStoreApi
+// No manual provideState() call needed
+providers: [
+  provideStore(),
+  provideStoreApi(postsApi), // Automatically calls provideState()
+]
+```
+
+## Comparison with provideNoopStoreApi
+
+| Feature | provideStoreApi | provideNoopStoreApi |
+|---------|-----------------|---------------------|
+| NgRx dependency | Required | None |
+| Redux DevTools | Supported | Not available |
+| State integration | Full NgRx Store | Standalone signal-based store |
+| Bundle size | Larger (includes NgRx) | Smaller |
+| Use case | Apps with NgRx | Standalone RTK Query |
+
+## See Also
+
+- [provideNoopStoreApi](/api/provide-noop-store-api) - Standalone store provider
+- [createApi](/api/create-api) - Create RTK Query API definitions
+- [Store Configuration Guide](/guides/store-configuration) - Store setup and configuration

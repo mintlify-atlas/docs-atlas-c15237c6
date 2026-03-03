@@ -1,0 +1,179 @@
+---
+title: Introduction
+description: Learn about ngrx-rtk-query - A powerful data fetching and caching library for Angular applications using RTK Query and Signals
+---
+
+# Introduction to ngrx-rtk-query
+
+**ngrx-rtk-query** is a plugin that brings the power of RTK Query (Redux Toolkit Query) to Angular applications with NgRx. It combines RTK Query's auto-generated hooks with Angular's **Signals** to deliver the same powerful data fetching and caching functionality as the official [RTK Query guide with hooks](https://redux-toolkit.js.org/rtk-query/overview).
+
+## What is ngrx-rtk-query?
+
+ngrx-rtk-query bridges the gap between React's RTK Query and Angular's component model, providing:
+
+- **Auto-generated hooks** from API definitions (`useXxxQuery`, `useLazyXxxQuery`, `useXxxMutation`)
+- **Signal-based reactivity** for fine-grained change detection
+- **Seamless integration** with or without NgRx Store
+- **TypeScript-first** design with full type safety
+- **Familiar API** that follows RTK Query conventions
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Get started with installation instructions and version compatibility
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Build your first API integration in minutes
+  </Card>
+  <Card title="Queries" icon="database" href="/concepts/queries">
+    Learn how to fetch data with queries and lazy queries
+  </Card>
+  <Card title="Mutations" icon="pen-to-square" href="/concepts/mutations">
+    Discover how to modify data with mutations
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Signal-Based Reactivity
+
+Leverage Angular Signals for optimal change detection and reactivity:
+
+```typescript
+export class PostsListComponent {
+  postsQuery = useGetPostsQuery();
+  
+  // Fine-grained signal access
+  isLoading = this.postsQuery.isLoading(); // Better change detection
+  data = this.postsQuery.data();
+}
+```
+
+### Auto-Generated Hooks
+
+Define your API once, and get fully-typed hooks automatically:
+
+```typescript
+export const postsApi = createApi({
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({ /* ... */ }),
+    addPost: build.mutation<Post, Partial<Post>>({ /* ... */ }),
+  }),
+});
+
+// Auto-generated hooks ready to use
+export const { useGetPostsQuery, useAddPostMutation } = postsApi;
+```
+
+### Flexible Store Integration
+
+Works with or without NgRx Store:
+
+<CodeGroup>
+```typescript With NgRx Store
+import { provideStore } from '@ngrx/store';
+import { provideStoreApi } from 'ngrx-rtk-query';
+
+providers: [
+  provideStore(),
+  provideStoreApi(postsApi),
+]
+```
+
+```typescript Without NgRx Store
+import { provideNoopStoreApi } from 'ngrx-rtk-query/noop-store';
+
+providers: [
+  provideNoopStoreApi(postsApi),
+]
+```
+</CodeGroup>
+
+### Smart Caching & Invalidation
+
+Built-in intelligent caching with tag-based invalidation:
+
+```typescript
+getPosts: build.query<Post[], void>({
+  query: () => ({ url: '/posts' }),
+  providesTags: [{ type: 'Posts', id: 'LIST' }],
+}),
+addPost: build.mutation<Post, Partial<Post>>({
+  query: (body) => ({ url: '/posts', method: 'POST', body }),
+  invalidatesTags: [{ type: 'Posts', id: 'LIST' }],
+}),
+```
+
+### Dynamic Query Arguments
+
+Pass signals, functions, or static values as query arguments:
+
+```typescript
+// Signal input from router
+id = input.required<number>();
+postQuery = useGetPostQuery(this.id);
+
+// Function for computed values
+postQuery = useGetPostQuery(() => this.userId());
+
+// Skip conditionally with skipToken
+locationQuery = useGetLocationQuery(() => this.character()?.location ?? skipToken);
+```
+
+### Infinite Queries
+
+Built-in support for pagination and infinite scrolling:
+
+```typescript
+getPokemon: build.infiniteQuery<Pokemon[], string, number>({
+  infiniteQueryOptions: {
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages, lastPageParam) => lastPageParam + 1,
+  },
+  query: ({ queryArg, pageParam }) => `/type/${queryArg}?page=${pageParam}`,
+}),
+```
+
+### TypeScript Excellence
+
+Fully typed API with excellent IDE support and type inference:
+
+```typescript
+interface Post {
+  id: number;
+  name: string;
+  fetched_at: string;
+}
+
+// Full type safety throughout
+const postsQuery = useGetPostsQuery(); // Type: Signal<Post[]>
+const addPost = useAddPostMutation(); // Accepts Partial<Post>
+```
+
+## Why ngrx-rtk-query?
+
+<CardGroup cols={2}>
+  <Card title="Proven Technology" icon="shield-check">
+    Built on RTK Query, battle-tested by the Redux community
+  </Card>
+  <Card title="Angular Native" icon="angular">
+    Designed specifically for Angular with Signals and dependency injection
+  </Card>
+  <Card title="Developer Experience" icon="code">
+    Auto-generated hooks, full TypeScript support, and minimal boilerplate
+  </Card>
+  <Card title="Performance" icon="gauge-high">
+    Optimized change detection with fine-grained signal updates
+  </Card>
+</CardGroup>
+
+## Ready to Get Started?
+
+<Card title="Install ngrx-rtk-query" icon="rocket" href="/installation">
+  Follow the installation guide to add ngrx-rtk-query to your Angular project
+</Card>
+
+<Note>
+  **Version Alignment**: Library versions align with Angular major versions (e.g., ngrx-rtk-query 21.x works with Angular 21.x)
+</Note>

@@ -1,0 +1,228 @@
+---
+title: useLazyQuery
+description: Auto-generated hook for on-demand data fetching with manual trigger
+---
+
+`useLazyQuery` is an auto-generated hook that provides a trigger function to fetch data on demand, rather than automatically on component mount.
+
+## Overview
+
+For an endpoint named `getPosts`, the generated lazy hook will be `useLazyGetPostsQuery`.
+
+```typescript
+export const postsApi = createApi({
+  baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+  endpoints: (build) => ({
+    getPosts: build.query<Post[], void>({
+      query: () => '/posts',
+    }),
+  }),
+});
+
+export const { useLazyGetPostsQuery } = postsApi;
+```
+
+## Signature
+
+```typescript
+const [trigger, result, lastArg] = useLazyXxxQuery(options?);
+```
+
+<ParamField path="options" type="UseQueryOptions">
+  Optional configuration object or signal
+
+  <Expandable title="Query options">
+    <ParamField path="selectFromResult" type="function">
+      Select a subset of the result for fine-grained reactivity
+    </ParamField>
+    
+    <ParamField path="pollingInterval" type="number">
+      Refetch interval in milliseconds after first trigger
+    </ParamField>
+    
+    <ParamField path="skipPollingIfUnfocused" type="boolean">
+      Skip polling when window is unfocused
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Return Value
+
+Returns an object with trigger function and query state:
+
+<ResponseField name="trigger" type="(arg: QueryArg, options?) => Promise">
+  Function to trigger the query. Returns a promise that resolves to the result.
+  
+  Options:
+  - `preferCacheValue: boolean` - Use cached value if available (default: `false`)
+</ResponseField>
+
+<ResponseField name="data" type="Signal<ResultType | undefined>">
+  The returned data from the query
+</ResponseField>
+
+<ResponseField name="isLoading" type="Signal<boolean>">
+  `true` if the query is loading
+</ResponseField>
+
+<ResponseField name="isFetching" type="Signal<boolean>">
+  `true` if the query is currently fetching
+</ResponseField>
+
+<ResponseField name="isSuccess" type="Signal<boolean>">
+  `true` if the query has succeeded
+</ResponseField>
+
+<ResponseField name="isError" type="Signal<boolean>">
+  `true` if the query has errored
+</ResponseField>
+
+<ResponseField name="error" type="Signal<Error | undefined>">
+  The error object if the query failed
+</ResponseField>
+
+<ResponseField name="lastArg" type="Signal<QueryArg | undefined>">
+  The last argument passed to the trigger function
+</ResponseField>
+
+<ResponseField name="reset" type="() => void">
+  Function to reset the query state
+</ResponseField>
+
+## Usage Examples
+
+### Basic Usage
+
+```typescript
+import { useLazyGetPostsQuery } from './api';
+
+@Component({
+  selector: 'app-posts',
+  template: `
+    <button (click)="loadPosts()">Load Posts</button>
+    
+    @if (postsQuery.isLoading()) {
+      <p>Loading...</p>
+    }
+    @if (postsQuery.data(); as posts) {
+      @for (post of posts; track post.id) {
+        <div>{{ post.title }}</div>
+      }
+    }
+  `,
+})
+export class PostsComponent {
+  postsQuery = useLazyGetPostsQuery();
+  
+  loadPosts() {
+    this.postsQuery();
+  }
+}
+```
+
+### With Arguments
+
+```typescript
+export class PostSearchComponent {
+  searchQuery = useLazySearchPostsQuery();
+  
+  search(term: string) {
+    this.searchQuery(term).unwrap()
+      .then(results => console.log('Search results:', results))
+      .catch(error => console.error('Search failed:', error));
+  }
+}
+```
+
+### With preferCacheValue
+
+```typescript
+export class PostDetailsComponent implements OnInit {
+  postId = input.required<number>();
+  postQuery = useLazyGetPostQuery();
+  
+  ngOnInit() {
+    // Use cache if available, otherwise fetch
+    this.postQuery(this.postId(), { preferCacheValue: true });
+  }
+}
+```
+
+### Reset State
+
+```typescript
+export class PostSearchComponent {
+  searchQuery = useLazySearchPostsQuery();
+  
+  search(term: string) {
+    this.searchQuery(term);
+  }
+  
+  clearSearch() {
+    this.searchQuery.reset();
+  }
+}
+```
+
+### Access Last Argument
+
+```typescript
+@Component({
+  template: `
+    <p>Last search: {{ searchQuery.lastArg() }}</p>
+    <p>Results: {{ searchQuery.data()?.length }}</p>
+  `,
+})
+export class PostSearchComponent {
+  searchQuery = useLazySearchPostsQuery();
+  
+  search(term: string) {
+    this.searchQuery(term);
+  }
+}
+```
+
+## When to Use
+
+<CardGroup cols={2}>
+  <Card title="Use useLazyQuery" icon="hand-pointer">
+    - User-triggered actions (search, load more)
+    - Conditional data loading
+    - On-demand fetching based on user interaction
+    - Pagination with manual page controls
+  </Card>
+  
+  <Card title="Use useQuery" icon="rotate">
+    - Data needed on component mount
+    - Automatic refetching
+    - Real-time data with polling
+    - Router parameter-based fetching
+  </Card>
+</CardGroup>
+
+## Comparison with useQuery
+
+```typescript
+// useQuery: Automatic fetching
+const postsQuery = useGetPostsQuery();
+// ✅ Fetches immediately on mount
+// ✅ Refetches automatically with options
+// ❌ Can't control when to fetch
+
+// useLazyQuery: Manual triggering
+const postsQuery = useLazyGetPostsQuery();
+postsQuery(); // Trigger fetch manually
+// ✅ Full control over when to fetch
+// ✅ Can pass different arguments
+// ❌ Requires manual trigger
+```
+
+<Tip>
+For most use cases, prefer `useQuery`. Only use `useLazyQuery` when you need explicit control over when the query executes.
+</Tip>
+
+## See Also
+
+- [useQuery](/api/hooks/use-query) - For automatic queries
+- [Lazy Queries Concept](/concepts/lazy-queries) - Core concepts
+- [Pagination Example](/examples/pagination) - Using with pagination

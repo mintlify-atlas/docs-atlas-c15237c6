@@ -1,0 +1,205 @@
+---
+title: Mutation Types
+description: TypeScript types for mutation hooks and their results in ngrx-rtk-query
+---
+
+## Mutation Hook Types
+
+### UseMutation
+
+The main mutation hook type for triggering updates and reading request status.
+
+```typescript
+type UseMutation<D extends MutationDefinition<any, any, any, any>> = <
+  R extends Record<string, any> = MutationResultSelectorResult<D>,
+>(
+  options?: UseMutationStateOptions<D, R>,
+) => MutationTrigger<D> & UseMutationStateResult<D, R>;
+```
+
+**Features:**
+- Manual control over firing requests to alter server data
+- Subscribes component to keep cached data in store
+- Returns latest request status and cached data
+- Re-renders as request status changes and data becomes available
+
+**Example:**
+```typescript
+export class PostEditorComponent {
+  addPost = useAddPostMutation();
+  updatePost = useUpdatePostMutation();
+  deletePost = useDeletePostMutation();
+
+  onSave(post: Post) {
+    this.addPost(post).unwrap()
+      .then(() => console.log('Post added'))
+      .catch(error => console.error('Failed:', error));
+  }
+}
+```
+
+### TypedUseMutation
+
+Helper type for creating strongly-typed mutation hooks.
+
+```typescript
+type TypedUseMutation<ResultType, QueryArg, BaseQuery extends BaseQueryFn> = UseMutation<
+  MutationDefinition<QueryArg, BaseQuery, string, ResultType, string>
+>;
+```
+
+**Example:**
+```typescript
+type AddPostMutation = TypedUseMutation<
+  Post,
+  Partial<Post>,
+  ReturnType<typeof fetchBaseQuery>
+>;
+```
+
+## Mutation Options Types
+
+### UseMutationStateOptions
+
+Options for configuring mutation behavior.
+
+```typescript
+type UseMutationStateOptions<
+  D extends MutationDefinition<any, any, any, any>,
+  R extends Record<string, any>
+> = {
+  selectFromResult?: MutationStateSelector<R, D>;
+  fixedCacheKey?: string;
+};
+```
+
+<ResponseField name="selectFromResult" type="(state) => R">
+Allows extracting specific segments from mutation results for performant rendering. Component only re-renders when selected data changes.
+</ResponseField>
+
+<ResponseField name="fixedCacheKey" type="string">
+Optional fixed cache key for sharing mutation state across multiple components. Useful when multiple components need to track the same mutation.
+</ResponseField>
+
+**Example with fixedCacheKey:**
+```typescript
+// Component A
+addPost = useAddPostMutation({ fixedCacheKey: 'shared-add-post' });
+
+// Component B (shares same mutation state)
+addPost = useAddPostMutation({ fixedCacheKey: 'shared-add-post' });
+// Both components see the same isLoading, data, error states
+```
+
+### MutationStateSelector
+
+Function type for selecting specific data from mutation results.
+
+```typescript
+type MutationStateSelector<
+  R extends Record<string, any>,
+  D extends MutationDefinition<any, any, any, any>
+> = (state: MutationResultSelectorResult<D>) => R;
+```
+
+**Example:**
+```typescript
+const selectStatus: MutationStateSelector<
+  { status: string },
+  MutationDefinition<...>
+> = (state) => ({ 
+  status: state.isLoading ? 'saving' : state.isSuccess ? 'saved' : 'idle'
+});
+
+addPost = useAddPostMutation({ selectFromResult: selectStatus });
+console.log(addPost.status()); // 'saving' | 'saved' | 'idle'
+```
+
+## Trigger Types
+
+### MutationTrigger
+
+Function type for triggering mutations.
+
+```typescript
+type MutationTrigger<D extends MutationDefinition<any, any, any, any>> = {
+  (arg: QueryArgFrom<D>): MutationActionCreatorResult<D>;
+};
+```
+
+**Returns:** Promise-like object with `.unwrap()` method
+
+**Usage with .unwrap():**
+
+The trigger function returns a promise-like object. Chain `.unwrap()` to access the resolved data or catch errors:
+
+```typescript
+// With async/await
+try {
+  const post = await this.addPost({ title: 'New Post' }).unwrap();
+  console.log('Created:', post);
+} catch (error) {
+  console.error('Failed:', error);
+}
+
+// With .then()/.catch()
+this.deletePost(id)
+  .unwrap()
+  .then(() => this.router.navigate(['/posts']))
+  .catch(error => console.error('Error deleting:', error));
+```
+
+### TypedMutationTrigger
+
+Helper type for creating strongly-typed mutation triggers.
+
+```typescript
+type TypedMutationTrigger<ResultType, QueryArg, BaseQuery extends BaseQueryFn> = MutationTrigger<
+  MutationDefinition<QueryArg, BaseQuery, string, ResultType, string>
+>;
+```
+
+**Example:**
+```typescript
+type AddPostTrigger = TypedMutationTrigger<
+  Post,
+  Partial<Post>,
+  ReturnType<typeof fetchBaseQuery>
+>;
+
+const trigger: AddPostTrigger = (post) => { /* ... */ };
+```
+
+## Mutation Hooks Type
+
+Collection of mutation hooks generated for a mutation endpoint.
+
+```typescript
+type MutationHooks<Definition extends MutationDefinition<any, any, any, any, any>> = {
+  useMutation: UseMutation<Definition>;
+};
+```
+
+**Example from generated API:**
+```typescript
+const postsApi = createApi({
+  endpoints: (build) => ({
+    addPost: build.mutation<Post, Partial<Post>>({
+      query: (body) => ({ url: '/posts', method: 'POST', body }),
+    }),
+  }),
+});
+
+// Generated hook matches MutationHooks type
+const { useAddPostMutation } = postsApi;
+// Type: UseMutation<MutationDefinition<Partial<Post>, BaseQueryFn, string, Post, string>>
+```
+
+## Result Types
+
+See [Hook Result Types](/api/types/hook-result-types) for details on mutation result objects including:
+
+- `UseMutationStateResult` - State returned by mutation hooks
+- `TypedUseMutationResult` - Strongly-typed helper for mutation results
+- Signal properties like `isLoading()`, `data()`, `error()`
+- `reset()` method for clearing mutation state
